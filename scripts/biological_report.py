@@ -1,38 +1,186 @@
 #!/usr/bin/env python3
-
-from argparse import ArgumentParser
-from html import escape
+# run as -> python banana_sample_reporter_dashboard.py /path/to/run_root --outdir
+import argparse, math, json, re, html
 from pathlib import Path
-import re
-
 import pandas as pd
-import plotly.express as px
-import plotly.io as pio
+
+HTML_TEMPLATE = '''<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Serif:wght@600&display=swap" rel="stylesheet">
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+:root,[data-theme="light"]{--bg:#f7f6f2;--surface:#fbfbf9;--surface2:#f1efea;--text:#22201b;--muted:#6f6b63;--primary:#01696f;--border:#d8d4cc;--accent:#d19900;--shadow:0 8px 24px rgba(0,0,0,.05)}
+[data-theme="dark"]{--bg:#171614;--surface:#1d1c1a;--surface2:#252320;--text:#ece8df;--muted:#a49e93;--primary:#4f98a3;--border:#3b3832;--accent:#e8af34;--shadow:0 8px 24px rgba(0,0,0,.24)}
+*{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+.container{max-width:1180px;margin:0 auto;padding:24px} header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:24px}
+.brand{display:flex;gap:14px;align-items:center} .logo{width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,var(--primary),var(--accent));box-shadow:var(--shadow)}
+h1{font:600 clamp(2rem,3vw,3.2rem) 'IBM Plex Serif',serif;margin:0} h2{margin:0;font-size:1.2rem} .sub{color:var(--muted);margin-top:6px}
+button{border:1px solid var(--border);background:var(--surface);color:var(--text);padding:10px 14px;border-radius:10px;cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px} .card{grid-column:span 12;background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:18px;box-shadow:var(--shadow)}
+.kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:14px} .kpi .mini{background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:14px} .kpi .v{font-size:1.5rem;font-weight:700} .kpi .l{color:var(--muted);font-size:.92rem}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px} .seg{display:inline-flex;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:4px;gap:4px} .seg button{padding:8px 12px;border:none;background:transparent} .seg button.active{background:var(--primary);color:white}
+.helper{font-size:.9rem;color:var(--muted)} .breadcrumbs{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 10px 0} .crumb{padding:5px 9px;border-radius:999px;background:var(--surface2);border:1px solid var(--border);font-size:.84rem} .crumb.active{background:rgba(1,105,111,.12);color:var(--primary);border-color:rgba(1,105,111,.25)}
+.pill{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(1,105,111,.1);color:var(--primary);font-size:.85rem;font-weight:600} table{width:100%;border-collapse:collapse} th,td{padding:10px 8px;border-bottom:1px solid var(--border);text-align:left;font-size:.95rem;vertical-align:top} th{color:var(--muted);font-weight:600} .footer{color:var(--muted);font-size:.9rem;margin-top:18px}
+@media (max-width:900px){.kpi{grid-template-columns:repeat(2,1fr)} .half{grid-column:span 12 !important}} @media (min-width:901px){.half{grid-column:span 6}}
+</style>
+</head>
+<body>
+<div class="container">
+<header>
+<div class="brand"><div class="logo"></div><div><div class="pill">BaNaNA sample overview</div><h1>__SAMPLE__</h1><div class="sub">Interactive overview of sequencing quality, rRNA extraction, OTU composition, and taxonomy assignment.</div></div></div>
+<div style="display:flex;gap:10px"><button onclick="toggleTheme()">Toggle theme</button><button onclick="window.print()">Print / Save PDF</button></div>
+</header>
+<section class="card"><h2>Key metrics</h2><div class="kpi">
+<div class="mini"><div class="l">Raw reads</div><div class="v">__RAWREADS__</div></div>
+<div class="mini"><div class="l">Mean read length</div><div class="v">__MEANLEN__</div></div>
+<div class="mini"><div class="l">Reads > Q20</div><div class="v">__Q20__</div></div>
+<div class="mini"><div class="l">Observed OTUs</div><div class="v">__OBSOTUS__</div></div>
+</div></section>
+<div class="grid" style="margin-top:16px">
+<section class="card half"><h2>Sequencing quality</h2><div id="qualChart" style="height:340px"></div></section>
+<section class="card half"><h2>rRNA extraction</h2><div id="rrnaChart" style="height:340px"></div></section>
+<section class="card half"><div class="toolbar"><h2>Top species</h2><div class="seg"><button id="speciesReadsBtn" class="active" onclick="setSpeciesMode('reads')">Reads</button><button id="speciesPctBtn" onclick="setSpeciesMode('percent')">Percent</button></div></div><div class="helper">Switch between absolute read counts and relative abundance percentages.</div><div id="speciesChart" style="height:360px"></div></section>
+<section class="card half"><div class="toolbar"><div><h2>Taxonomic composition</h2><div class="helper">Click a pie segment to drill down to the next taxonomic rank. Use breadcrumbs to go back.</div></div><button onclick="resetTaxonomy()">Reset</button></div><div class="breadcrumbs" id="taxBreadcrumbs"></div><div id="taxonomyChart" style="height:390px"></div></section>
+<section class="card"><h2>Sample interpretation</h2><p>This sample contains __OBSOTUS__ OTUs with __TOTALREADS__ reads represented in the OTU table. Shannon diversity is __SHANNON__ and Simpson diversity is __SIMPSON__, which summarize richness and evenness across detected OTUs.</p><p>The dominant species-level assignment is <strong>__TOPSPECIES__</strong> with __TOPSPECIESREADS__ reads, and the mean identity across the five most abundant OTUs is __MEANTOP5__%.</p></section>
+<section class="card half"><h2>Top OTUs</h2><table><thead><tr><th>OTU</th><th>Species</th><th>Reads</th><th>Pident</th></tr></thead><tbody>__TOPOTUS__</tbody></table></section>
+<section class="card half"><h2>Overview table</h2><table><tbody>
+<tr><th>Median read length</th><td>__MEDIANLEN__</td></tr>
+<tr><th>N50</th><td>__N50__</td></tr>
+<tr><th>Mean quality</th><td>__MEANQUAL__</td></tr>
+<tr><th>18S detected</th><td>__R18__</td></tr>
+<tr><th>5.8S detected</th><td>__R58__</td></tr>
+<tr><th>28S detected</th><td>__R28__</td></tr>
+<tr><th>Shannon</th><td>__SHANNON__</td></tr>
+<tr><th>Simpson</th><td>__SIMPSON__</td></tr>
+</tbody></table></section>
+</div>
+<div class="footer">Open this report in a browser for interactive charts, then use Print / Save PDF to export a PDF version.</div>
+</div>
+<script>
+const speciesLabels = __SPECIES_LABELS__;
+const speciesReads = __SPECIES_READS__;
+const speciesPercent = __SPECIES_PCT__;
+const taxonomyRecords = __TAX_RECORDS__;
+const taxonomyLevels = __TAX_LEVELS__;
+let speciesMode = 'reads';
+let taxState = {levelIndex: 0, path: []};
+function themeVars() { return {paper: 'rgba(0,0,0,0)', fontColor: getComputedStyle(document.documentElement).getPropertyValue('--text').trim(), gridColor: getComputedStyle(document.documentElement).getPropertyValue('--border').trim()}; }
+function toggleTheme() { const htmlEl = document.documentElement; htmlEl.setAttribute('data-theme', htmlEl.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); drawAll(); }
+function drawQuality() { const t = themeVars(); Plotly.newPlot('qualChart', [{x:['Q10','Q15','Q20','Q25','Q30'], y:[__Q10_PCT__,__Q15_PCT__,__Q20_PCT__,__Q25_PCT__,__Q30_PCT__], type:'bar', marker:{color:['#4f98a3','#4f98a3','#01696f','#d19900','#a13544']}}], {margin:{l:40,r:10,t:10,b:40}, paper_bgcolor:t.paper, plot_bgcolor:t.paper, font:{color:t.fontColor}, yaxis:{title:'% reads', gridcolor:t.gridColor}}, {responsive:true}); }
+function drawRrna() { const t = themeVars(); Plotly.newPlot('rrnaChart', [{labels:['18S','5.8S','28S'], values:[__RR18__,__RR58__,__RR28__], type:'pie', hole:.45, marker:{colors:['#01696f','#d19900','#437a22']}}], {margin:{l:10,r:10,t:10,b:10}, paper_bgcolor:t.paper, font:{color:t.fontColor}}, {responsive:true}); }
+function drawSpecies() { const t = themeVars(); const x = speciesMode === 'reads' ? speciesReads : speciesPercent; const xTitle = speciesMode === 'reads' ? 'Reads' : 'Percent of OTU-table reads'; const hover = speciesMode === 'reads' ? '%{y}<br>%{x} reads<extra></extra>' : '%{y}<br>%{x:.3f}%<extra></extra>'; Plotly.newPlot('speciesChart', [{x:x, y:speciesLabels, type:'bar', orientation:'h', marker:{color:'#01696f'}, hovertemplate:hover}], {margin:{l:170,r:10,t:10,b:40}, paper_bgcolor:t.paper, plot_bgcolor:t.paper, font:{color:t.fontColor}, xaxis:{title:xTitle, gridcolor:t.gridColor}, yaxis:{autorange:'reversed'}}, {responsive:true}); document.getElementById('speciesReadsBtn').classList.toggle('active', speciesMode === 'reads'); document.getElementById('speciesPctBtn').classList.toggle('active', speciesMode === 'percent'); }
+function setSpeciesMode(mode) { speciesMode = mode; drawSpecies(); }
+function aggregateTaxonomy(records, levelIndex, path) { const filtered = records.filter(rec => path.every((p, i) => rec[taxonomyLevels[i]] === p)); const current = taxonomyLevels[levelIndex]; const buckets = new Map(); filtered.forEach(rec => { const key = rec[current] || 'Unassigned'; buckets.set(key, (buckets.get(key) || 0) + rec.reads); }); const arr = Array.from(buckets.entries()).map(([label, value]) => ({label, value})).sort((a,b) => b.value - a.value); return {current, arr}; }
+function drawBreadcrumbs() { const wrap = document.getElementById('taxBreadcrumbs'); wrap.innerHTML = taxonomyLevels.map((lv, i) => { const active = i === taxState.levelIndex ? ' active' : ''; const label = i < taxState.path.length ? `${lv}: ${taxState.path[i]}` : lv; return `<button class="crumb${active}" onclick="jumpToLevel(${i})">${label}</button>`; }).join(''); }
+function drawTaxonomy() { const t = themeVars(); const agg = aggregateTaxonomy(taxonomyRecords, taxState.levelIndex, taxState.path); const labels = agg.arr.map(d => d.label); const values = agg.arr.map(d => d.value); const titleText = taxState.path.length ? `${agg.current} within ` + taxState.path.join(' › ') : agg.current; Plotly.newPlot('taxonomyChart', [{labels:labels, values:values, type:'pie', hole:.35, sort:false, textinfo:'label+percent'}], {title:{text:titleText,font:{size:16}}, margin:{l:10,r:10,t:40,b:10}, paper_bgcolor:t.paper, font:{color:t.fontColor}}, {responsive:true}); const chart = document.getElementById('taxonomyChart'); chart.on('plotly_click', function(ev) { if (taxState.levelIndex >= taxonomyLevels.length - 1) return; const clicked = ev.points[0].label; taxState.path = taxState.path.slice(0, taxState.levelIndex); taxState.path.push(clicked); taxState.levelIndex += 1; drawBreadcrumbs(); drawTaxonomy(); }); }
+function jumpToLevel(i) { taxState.levelIndex = i; taxState.path = taxState.path.slice(0, i); drawBreadcrumbs(); drawTaxonomy(); }
+function resetTaxonomy() { taxState = {levelIndex: 0, path: []}; drawBreadcrumbs(); drawTaxonomy(); }
+function drawAll() { drawQuality(); drawRrna(); drawSpecies(); drawBreadcrumbs(); drawTaxonomy(); }
+drawAll();
+</script>
+</body>
+</html>'''
+
+DASHBOARD_TEMPLATE = '''<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BaNaNA multi-sample dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Serif:wght@600&display=swap" rel="stylesheet">
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+:root,[data-theme="light"]{--bg:#f7f6f2;--surface:#fbfbf9;--surface2:#f1efea;--text:#22201b;--muted:#6f6b63;--primary:#01696f;--border:#d8d4cc;--accent:#d19900;--shadow:0 8px 24px rgba(0,0,0,.05)}
+[data-theme="dark"]{--bg:#171614;--surface:#1d1c1a;--surface2:#252320;--text:#ece8df;--muted:#a49e93;--primary:#4f98a3;--border:#3b3832;--accent:#e8af34;--shadow:0 8px 24px rgba(0,0,0,.24)}
+*{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+.container{max-width:1280px;margin:0 auto;padding:24px}.hero{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:18px}
+.logo{width:46px;height:46px;border-radius:14px;background:linear-gradient(135deg,var(--primary),var(--accent));box-shadow:var(--shadow)} .brand{display:flex;gap:14px;align-items:center}
+h1{font:600 clamp(2rem,3vw,3.2rem) 'IBM Plex Serif',serif;margin:0} h2{margin:0;font-size:1.2rem}.sub{color:var(--muted);margin-top:6px;max-width:70ch}
+button{border:1px solid var(--border);background:var(--surface);color:var(--text);padding:10px 14px;border-radius:10px;cursor:pointer}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:16px 0}.kpi{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:var(--shadow)}.kpi .l{font-size:.9rem;color:var(--muted)}.kpi .v{font-size:1.6rem;font-weight:700}
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}.card{grid-column:span 12;background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:18px;box-shadow:var(--shadow)}.half{grid-column:span 6}
+.helper{font-size:.9rem;color:var(--muted);margin-top:4px}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}.seg{display:inline-flex;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:4px;gap:4px}.seg button{padding:8px 12px;border:none;background:transparent}.seg button.active{background:var(--primary);color:#fff}
+table{width:100%;border-collapse:collapse}th,td{padding:10px 8px;border-bottom:1px solid var(--border);text-align:left;font-size:.95rem}th{color:var(--muted);font-weight:600}a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}
+@media (max-width:950px){.kpis{grid-template-columns:repeat(2,1fr)}.half{grid-column:span 12}}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="hero">
+<div class="brand"><div class="logo"></div><div><h1>Multi-sample dashboard</h1><div class="sub">Study-level overview of sequencing quality, diversity, rRNA detection, and taxonomy composition across all processed samples.</div></div></div>
+<div><button onclick="toggleTheme()">Toggle theme</button></div>
+</div>
+<div class="kpis">
+<div class="kpi"><div class="l">Samples</div><div class="v">__NSAMPLES__</div></div>
+<div class="kpi"><div class="l">Total reads</div><div class="v">__TOTALREADS__</div></div>
+<div class="kpi"><div class="l">Median OTUs</div><div class="v">__MEDOTUS__</div></div>
+<div class="kpi"><div class="l">Median Shannon</div><div class="v">__MEDSHANNON__</div></div>
+</div>
+<div class="grid">
+<section class="card"><div class="toolbar"><div><h2>Sample summary</h2><div class="helper">Click a sample name to open its individual HTML report.</div></div></div><div style="overflow:auto"><table><thead><tr><th>Sample</th><th>Raw reads</th><th>Mean length</th><th>Q20 reads</th><th>Observed OTUs</th><th>Shannon</th><th>Simpson</th><th>Top species</th></tr></thead><tbody>__SUMMARY_ROWS__</tbody></table></div></section>
+<section class="card half"><h2>Reads per sample</h2><div id="readsChart" style="height:350px"></div></section>
+<section class="card half"><h2>Diversity comparison</h2><div id="divChart" style="height:350px"></div></section>
+<section class="card half"><h2>rRNA detection</h2><div id="rrnaChart" style="height:360px"></div></section>
+<section class="card half"><div class="toolbar"><div><h2>Taxonomy heatmap</h2><div class="helper">Relative abundance by sample for the most abundant taxa at the selected rank.</div></div><div class="seg"><button id="rankDivision" class="active" onclick="setRank('Division')">Division</button><button id="rankClass" onclick="setRank('Class')">Class</button><button id="rankFamily" onclick="setRank('Family')">Family</button><button id="rankGenus" onclick="setRank('Genus')">Genus</button><button id="rankSpecies" onclick="setRank('Species')">Species</button></div></div><div id="taxHeatmap" style="height:420px"></div></section>
+</div>
+</div>
+<script>
+const summaryData = __SUMMARY_DATA__;
+const taxonomyMatrices = __TAX_MATRICES__;
+let currentRank = 'Division';
+function themeVars(){return {paper:'rgba(0,0,0,0)', fontColor:getComputedStyle(document.documentElement).getPropertyValue('--text').trim(), gridColor:getComputedStyle(document.documentElement).getPropertyValue('--border').trim()};}
+function toggleTheme(){const htmlEl=document.documentElement;htmlEl.setAttribute('data-theme', htmlEl.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); drawAll();}
+function drawReads(){const t=themeVars(); Plotly.newPlot('readsChart',[{x:summaryData.map(d=>d.sample), y:summaryData.map(d=>d.raw_reads_num), type:'bar', marker:{color:'#01696f'}}],{margin:{l:50,r:10,t:10,b:80},paper_bgcolor:t.paper,plot_bgcolor:t.paper,font:{color:t.fontColor},xaxis:{tickangle:-40},yaxis:{title:'Raw reads',gridcolor:t.gridColor}},{responsive:true});}
+function drawDiversity(){const t=themeVars(); Plotly.newPlot('divChart',[{x:summaryData.map(d=>d.observed_otus), y:summaryData.map(d=>d.shannon), text:summaryData.map(d=>d.sample), mode:'markers+text', textposition:'top center', type:'scatter', marker:{size:12,color:'#d19900',line:{color:'#01696f',width:1}}}],{margin:{l:55,r:10,t:10,b:45},paper_bgcolor:t.paper,plot_bgcolor:t.paper,font:{color:t.fontColor},xaxis:{title:'Observed OTUs',gridcolor:t.gridColor},yaxis:{title:'Shannon',gridcolor:t.gridColor}},{responsive:true});}
+function drawRrna(){const t=themeVars(); Plotly.newPlot('rrnaChart',[{x:summaryData.map(d=>d.sample), y:summaryData.map(d=>d.rrna18_pct), name:'18S', type:'bar'},{x:summaryData.map(d=>d.sample), y:summaryData.map(d=>d.rrna58_pct), name:'5.8S', type:'bar'},{x:summaryData.map(d=>d.sample), y:summaryData.map(d=>d.rrna28_pct), name:'28S', type:'bar'}],{barmode:'group',margin:{l:50,r:10,t:10,b:80},paper_bgcolor:t.paper,plot_bgcolor:t.paper,font:{color:t.fontColor},xaxis:{tickangle:-40},yaxis:{title:'Detected (%)',gridcolor:t.gridColor}},{responsive:true});}
+function drawHeatmap(){const t=themeVars(); const d=taxonomyMatrices[currentRank]; Plotly.newPlot('taxHeatmap',[{z:d.z,x:d.samples,y:d.taxa,type:'heatmap',colorscale:'Tealgrn',hovertemplate:'Sample: %{x}<br>Taxon: %{y}<br>Relative abundance: %{z:.3f}%<extra></extra>'}],{margin:{l:140,r:10,t:10,b:80},paper_bgcolor:t.paper,plot_bgcolor:t.paper,font:{color:t.fontColor},xaxis:{tickangle:-40}},{responsive:true}); ['Division','Class','Family','Genus','Species'].forEach(r=>document.getElementById('rank'+r).classList.toggle('active', r===currentRank));}
+function setRank(rank){currentRank=rank; drawHeatmap();}
+function drawAll(){drawReads(); drawDiversity(); drawRrna(); drawHeatmap();}
+drawAll();
+</script>
+</body>
+</html>'''
 
 
-RANKS = [
-    "domain",
-    "supergroup",
-    "division",
-    "subdivision",
-    "class",
-    "order",
-    "family",
-    "genus",
-    "species",
-]
-
-
-def parse_options():
-    parser = ArgumentParser(description="Create a biological HTML summary report for BaNaNA outputs")
-    parser.add_argument("--taxonomy", required=True, help="BaNaNA final taxonomy.tsv")
-    parser.add_argument("--otu-table", required=True, help="BaNaNA final otu_table.tsv")
-    parser.add_argument("--output", required=True, help="Output HTML report")
-    parser.add_argument("--output-dir", default=None, help="Directory for multi-sample and per-sample reports")
-    parser.add_argument("--nanoplot-dirs", nargs="*", default=[], help="NanoPlot output directories")
-    parser.add_argument("--rrna-stats", nargs="*", default=[], help="rRNA extraction stats files")
-    parser.add_argument("--top-n", type=int, default=15, help="Number of top taxa/OTUs to show")
-    return parser.parse_args()
+def parse_config_sample_names(config_path: Path):
+    text = config_path.read_text(encoding='utf-8', errors='ignore')
+    lines = text.splitlines()
+    names = []
+    in_sample_block = False
+    sample_block_indent = None
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        if re.match(r'^sample_name\s*:\s*$', stripped):
+            in_sample_block = True
+            sample_block_indent = len(line) - len(line.lstrip())
+            continue
+        if in_sample_block:
+            current_indent = len(line) - len(line.lstrip())
+            if current_indent <= sample_block_indent and re.match(r'^[A-Za-z0-9_\-]+\s*:', stripped):
+                break
+            m = re.match(r'^["\']?([^:"\'#]+?)["\']?\s*:\s*["\']?([^"\'#]+?)["\']?\s*$', stripped)
+            if m:
+                names.append(m.group(1).strip())
+                continue
+            m2 = re.match(r'^-\s*["\']?([^"\'#]+?)["\']?\s*$', stripped)
+            if m2:
+                names.append(m2.group(1).strip())
+    if names:
+        return names
+    m = re.search(r'^sample_name\s*:\s*(["\']?)([^\n#"\']+)\1\s*$', text, re.M)
+    if m:
+        return [m.group(2).strip()]
+    return []
 
 
 def clean_sample_name(name):
@@ -42,477 +190,283 @@ def clean_sample_name(name):
     return name
 
 
-def load_otu_table(path):
-    df = pd.read_csv(path, sep="\t")
-    df = df.rename(columns={df.columns[0]: "OTU"})
-    sample_cols = [col for col in df.columns if col != "OTU"]
-    rename = {col: clean_sample_name(col) for col in sample_cols}
-    df = df.rename(columns=rename)
-    sample_cols = [rename[col] for col in sample_cols]
-    for col in sample_cols:
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
-    return df, sample_cols
+def sample_from_nanoplot_dir(path: Path):
+    return path.name.replace("nanoplot_", "")
 
 
-def parse_taxonomy_field(value):
-    parts = str(value).split("|")
-    tax_parts = parts[4:] if len(parts) >= 13 else []
-    values = {}
-    for rank, taxon in zip(RANKS, tax_parts):
-        values[rank] = taxon or "unclassified"
-    for rank in RANKS:
-        values.setdefault(rank, "unclassified")
-    return values
-
-
-def load_taxonomy(path):
-    cols = [
-        "OTU",
-        "reference",
-        "identity",
-        "alignment_length",
-        "mismatches",
-        "gap_opens",
-        "q_start",
-        "q_end",
-        "s_start",
-        "s_end",
-        "evalue",
-        "bitscore",
-    ]
-    df = pd.read_csv(path, sep="\t", header=None, names=cols[:12])
-    if df.empty:
-        for rank in RANKS:
-            df[rank] = pd.Series(dtype="object")
-    else:
-        parsed = df["reference"].apply(parse_taxonomy_field).apply(pd.Series)
-        df = pd.concat([df, parsed], axis=1)
-        for rank in RANKS:
-            df[rank] = df[rank].fillna("unclassified")
-    df["identity"] = pd.to_numeric(df["identity"], errors="coerce")
-    return df
-
-
-def sample_from_nanoplot_dir(path):
-    name = Path(path).name
-    return name.replace("nanoplot_", "")
-
-
-def sample_from_rrna_stats(path):
-    name = Path(path).name
-    name = name.replace("rrna_extraction_stats_", "")
+def sample_from_rrna_stats(path: Path):
+    name = path.name.replace("rrna_extraction_stats_", "")
     return name.rsplit(".", 1)[0]
 
 
-def load_nanostats(paths):
-    records = {}
-    for path in paths:
-        sample = sample_from_nanoplot_dir(path)
-        stats_file = Path(path) / "NanoStats.txt"
-        if not stats_file.exists():
-            continue
-        stats = {}
-        with stats_file.open() as handle:
-            for line in handle:
-                parts = line.rstrip("\n").split("\t")
-                if len(parts) >= 2 and parts[0] != "Metrics":
-                    stats[parts[0]] = parts[1]
-        records[sample] = stats
-    return records
+def parse_q_percent(value):
+    match = re.search(r"\(([0-9.]+)%\)", str(value))
+    return float(match.group(1)) if match else 0.0
 
 
-def parse_q_metric(value):
-    if not isinstance(value, str):
-        return 0.0, 0.0
-    match = re.search(r"([0-9.]+)\s+\(([0-9.]+)%\)", value)
-    if not match:
-        return 0.0, 0.0
-    return float(match.group(1)), float(match.group(2))
+def load_otu_table(path: Path):
+    df = pd.read_csv(path, sep="\t")
+    df = df.rename(columns={df.columns[0]: "OTU"})
+    rename = {col: clean_sample_name(col) for col in df.columns if col != "OTU"}
+    df = df.rename(columns=rename)
+    for col in rename.values():
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+    return df, list(rename.values())
 
 
-def load_rrna_stats(paths):
-    records = {}
-    for path in paths:
-        sample = sample_from_rrna_stats(path)
-        stats = {}
-        current_total = None
-        with Path(path).open() as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                if line.startswith("All sequences:"):
-                    current_total = int(line.split(":", 1)[1].strip())
-                    continue
-                match = re.match(r"(.+?) detected (once|multiple times|not detected):\s+(\d+)", line)
-                if not match:
-                    continue
-                rrna, state, value = match.groups()
-                rrna = rrna.replace("_rRNA", "").replace("_", ".")
-                stats.setdefault(rrna, {"total": current_total or 0, "zero": 0, "one": 0, "multiple": 0})
-                key = {"once": "one", "multiple times": "multiple", "not detected": "zero"}[state]
-                stats[rrna][key] = int(value)
-                stats[rrna]["total"] = current_total or stats[rrna]["total"]
-        records[sample] = stats
-    return records
+def parse_taxonomy_reference(reference):
+    parts = str(reference).split("|")
+    accession = parts[0] if parts else "Unassigned"
+    taxa = parts[4:] if len(parts) >= 13 else []
+    ranks = ["Domain", "Supergroup", "Division", "Subdivision", "Class", "Order", "Family", "Genus", "Species"]
+    values = {rank: "Unassigned" for rank in ranks}
+    for rank, taxon in zip(ranks, taxa):
+        values[rank] = taxon or "Unassigned"
+    return accession, values
 
 
-def summarize_by_rank(long_df, rank, top_n):
-    data = long_df.groupby(["sample", rank], as_index=False)["abundance"].sum()
-    totals = data.groupby("sample", as_index=False)["abundance"].sum().rename(columns={"abundance": "total"})
-    data = data.merge(totals, on="sample", how="left")
-    data["relative_abundance"] = data["abundance"] / data["total"].where(data["total"] != 0, 1)
+def load_taxonomy(path: Path):
+    cols = [
+        "OTU",
+        "Reference",
+        "Pident",
+        "Length",
+        "Mismatches",
+        "Gap_opens",
+        "Q_start",
+        "Q_end",
+        "S_start",
+        "S_end",
+        "Evalue",
+        "Bitscore",
+    ]
+    if path.stat().st_size == 0:
+        return pd.DataFrame(columns=["OTU", "Pident", "Accession", "Domain", "Supergroup", "Division", "Subdivision", "Class", "Order", "Family", "Genus", "Species", "Length"])
+    df = pd.read_csv(path, sep="\t", header=None, names=cols[:12])
+    parsed = df["Reference"].apply(parse_taxonomy_reference)
+    df["Accession"] = parsed.apply(lambda value: value[0])
+    tax_df = parsed.apply(lambda value: value[1]).apply(pd.Series)
+    df = pd.concat([df[["OTU", "Pident", "Accession", "Length"]], tax_df], axis=1)
+    for col in ["Pident", "Length"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
 
-    top_taxa = (
-        data.groupby(rank, as_index=False)["abundance"]
-        .sum()
-        .sort_values("abundance", ascending=False)
-        .head(top_n)[rank]
-        .tolist()
-    )
-    data[rank] = data[rank].where(data[rank].isin(top_taxa), "Other")
-    data = data.groupby(["sample", rank], as_index=False)[["abundance", "relative_abundance"]].sum()
+
+def parse_nanostats(path: Path):
+    data = {}
+    with path.open(encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            if '\t' in line:
+                k, v = line.rstrip('\n').split('\t', 1)
+                data[k] = v
     return data
 
 
-def fig_html(fig):
-    return pio.to_html(fig, include_plotlyjs=False, full_html=False, config={"responsive": True})
+def parse_rrna_stats(path: Path):
+    rrna = {}
+    all_sequences = None
+    with path.open(encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            m = re.match(r'([^:]+):\s+(\d+)', line.strip())
+            if m:
+                key, val = m.group(1), int(m.group(2))
+                if key == 'All sequences' and all_sequences is None:
+                    all_sequences = val
+                elif key != 'All sequences':
+                    rrna[key] = val
+    return all_sequences, rrna
 
 
-def table_html(df, max_rows=25):
-    return df.head(max_rows).to_html(index=False, escape=True, classes="summary-table")
+def load_nanostats_by_sample(paths):
+    records = {}
+    for path in paths:
+        path = Path(path)
+        sample = sample_from_nanoplot_dir(path)
+        stats_file = path / "NanoStats.txt"
+        if stats_file.exists():
+            records[sample] = parse_nanostats(stats_file)
+    return records
 
 
-def sample_report_html(sample, sample_summary, sample_otus, tax_records, nanostats, rrna_stats, top_n):
-    q_labels = ["Q10", "Q15", "Q20", "Q25", "Q30"]
-    q_values = [parse_q_metric(nanostats.get(f"Reads >{q}:"))[1] for q in q_labels]
-    rrna_rows = []
-    rrna_figs = []
-    for rrna, vals in rrna_stats.items():
-        total = vals.get("total", 0) or 1
-        rrna_rows.append({
-            "rRNA": rrna,
-            "one": vals.get("one", 0),
-            "multiple": vals.get("multiple", 0),
-            "zero": vals.get("zero", 0),
-            "detected_percent": round((vals.get("one", 0) + vals.get("multiple", 0)) / total * 100, 2),
-        })
-        fig = px.pie(
-            names=["zero", "one", "multiple"],
-            values=[vals.get("zero", 0), vals.get("one", 0), vals.get("multiple", 0)],
-            title=f"{rrna} detection",
-            hole=0.45,
-        )
-        fig.update_layout(template="plotly_white", margin=dict(l=20, r=20, t=60, b=20))
-        rrna_figs.append(fig_html(fig))
+def load_rrna_stats_by_sample(paths):
+    records = {}
+    for path in paths:
+        path = Path(path)
+        sample = sample_from_rrna_stats(path)
+        if path.exists():
+            records[sample] = parse_rrna_stats(path)
+    return records
 
-    quality_fig = px.bar(
-        x=q_labels,
-        y=q_values,
-        title="Read quality thresholds",
-        labels={"x": "Threshold", "y": "Reads (%)"},
+
+def pick_existing(paths):
+    for p in paths:
+        if p.exists():
+            return p
+    return None
+
+
+def make_report(sample, df, nano, all_sequences, rrna, out_html: Path):
+    levels = ['Supergroup', 'Division', 'Subdivision', 'Class', 'Order', 'Family', 'Genus', 'Species']
+    total_otu_reads = int(df[sample].sum())
+    observed_otus = int((df[sample] > 0).sum())
+    rel = df[sample] / total_otu_reads if total_otu_reads else pd.Series(dtype=float)
+    shannon = float(-(rel[rel > 0] * rel[rel > 0].map(math.log)).sum()) if total_otu_reads else 0.0
+    simpson = float(1 - (rel ** 2).sum()) if total_otu_reads else 0.0
+    mean_pident_top5 = float(df['Pident'].head(5).mean()) if len(df) else float('nan')
+    top_species = df.groupby('Species', dropna=False)[sample].sum().sort_values(ascending=False).head(10)
+    top_species_labels = [str(x) if pd.notnull(x) else 'Unassigned' for x in top_species.index]
+    top_species_counts = [int(x) for x in top_species.values]
+    top_species_pct = [round(v / total_otu_reads * 100, 3) if total_otu_reads else 0 for v in top_species_counts]
+    taxonomy_records = []
+    for _, r in df.iterrows():
+        rec = {'reads': int(r[sample])}
+        for lv in levels:
+            rec[lv] = str(r[lv]) if pd.notnull(r[lv]) else 'Unassigned'
+        taxonomy_records.append(rec)
+    rrna18 = rrna.get('18S_rRNA detected once', 0) + rrna.get('18S_rRNA detected multiple times', 0)
+    rrna58 = rrna.get('5_8S_rRNA detected once', 0) + rrna.get('5_8S_rRNA detected multiple times', 0)
+    rrna28 = rrna.get('28S_rRNA detected once', 0) + rrna.get('28S_rRNA detected multiple times', 0)
+    top_otu_html = ''.join(
+        f"<tr><td>{html.escape(str(r['OTU']))}</td><td>{html.escape(str(r['Species']) if pd.notnull(r['Species']) else 'NA')}</td><td>{int(r[sample])}</td><td>{format(r['Pident'], '.1f') if pd.notnull(r['Pident']) else 'NA'}</td></tr>"
+        for _, r in df.head(10).iterrows()
     )
-    quality_fig.update_layout(template="plotly_white", margin=dict(l=40, r=20, t=60, b=50))
+    rep = HTML_TEMPLATE
+    replacements = {
+        '__TITLE__': html.escape(sample + ' report'), '__SAMPLE__': html.escape(sample), '__RAWREADS__': html.escape(str(nano.get('number_of_reads', 'NA'))),
+        '__MEANLEN__': html.escape(str(nano.get('mean_read_length', 'NA'))), '__Q20__': html.escape(str(nano.get('Reads >Q20:', 'NA').split()[0] if nano.get('Reads >Q20:') else 'NA')),
+        '__OBSOTUS__': str(observed_otus), '__TOTALREADS__': str(total_otu_reads), '__SHANNON__': f'{shannon:.2f}', '__SIMPSON__': f'{simpson:.3f}',
+        '__TOPSPECIES__': html.escape(top_species_labels[0] if top_species_labels else 'NA'), '__TOPSPECIESREADS__': str(top_species_counts[0] if top_species_counts else 0),
+        '__MEANTOP5__': f'{mean_pident_top5:.2f}', '__TOPOTUS__': top_otu_html, '__MEDIANLEN__': html.escape(str(nano.get('median_read_length', 'NA'))),
+        '__N50__': html.escape(str(nano.get('n50', 'NA'))), '__MEANQUAL__': html.escape(str(nano.get('mean_qual', 'NA'))),
+        '__R18__': f"{rrna18} / {all_sequences if all_sequences else 'NA'} ({round(rrna18/all_sequences*100,1) if all_sequences else 'NA'}%)",
+        '__R58__': f"{rrna58} / {all_sequences if all_sequences else 'NA'} ({round(rrna58/all_sequences*100,1) if all_sequences else 'NA'}%)",
+        '__R28__': f"{rrna28} / {all_sequences if all_sequences else 'NA'} ({round(rrna28/all_sequences*100,1) if all_sequences else 'NA'}%)",
+        '__SPECIES_LABELS__': json.dumps(top_species_labels), '__SPECIES_READS__': json.dumps(top_species_counts), '__SPECIES_PCT__': json.dumps(top_species_pct),
+        '__TAX_RECORDS__': json.dumps(taxonomy_records), '__TAX_LEVELS__': json.dumps(levels), '__RR18__': str(rrna18), '__RR58__': str(rrna58), '__RR28__': str(rrna28),
+        '__Q10_PCT__': str(parse_q_percent(nano.get('Reads >Q10:', '0%'))),
+        '__Q15_PCT__': str(parse_q_percent(nano.get('Reads >Q15:', '0%'))),
+        '__Q20_PCT__': str(parse_q_percent(nano.get('Reads >Q20:', '0%'))),
+        '__Q25_PCT__': str(parse_q_percent(nano.get('Reads >Q25:', '0%'))),
+        '__Q30_PCT__': str(parse_q_percent(nano.get('Reads >Q30:', '0%'))),
+    }
+    for k, v in replacements.items():
+        rep = rep.replace(k, v)
+    out_html.write_text(rep, encoding='utf-8')
+    return {
+        'sample': sample,
+        'raw_reads': nano.get('number_of_reads', 'NA'),
+        'raw_reads_num': int(re.sub(r'[^0-9]', '', str(nano.get('number_of_reads', '0')))) if re.search(r'\d', str(nano.get('number_of_reads', '0'))) else 0,
+        'mean_read_length': nano.get('mean_read_length', 'NA'),
+        'reads_gt_q20': nano.get('Reads >Q20:', 'NA'),
+        'observed_otus': observed_otus,
+        'shannon': shannon,
+        'simpson': simpson,
+        'top_species': top_species_labels[0] if top_species_labels else 'NA',
+        'rrna18_pct': round(rrna18/all_sequences*100, 3) if all_sequences else 0,
+        'rrna58_pct': round(rrna58/all_sequences*100, 3) if all_sequences else 0,
+        'rrna28_pct': round(rrna28/all_sequences*100, 3) if all_sequences else 0,
+        'report_file': out_html.name,
+    }
 
-    species_data = sample_otus.groupby("species", as_index=False)["abundance"].sum().sort_values("abundance", ascending=False).head(top_n)
-    species_fig = px.bar(
-        species_data,
-        x="abundance",
-        y="species",
-        orientation="h",
-        title=f"Top {top_n} species",
-        labels={"abundance": "Reads assigned to OTUs", "species": "Species"},
+
+def build_dashboard(summary_rows, taxonomy_matrices, out_html: Path):
+    total_reads = int(sum(r['raw_reads_num'] for r in summary_rows))
+    med_otus = pd.Series([r['observed_otus'] for r in summary_rows]).median()
+    med_shannon = pd.Series([r['shannon'] for r in summary_rows]).median()
+    table_rows = ''.join(
+        f"<tr><td><a href='{html.escape(r['report_file'])}' target='_blank' rel='noopener noreferrer'>{html.escape(r['sample'])}</a></td><td>{html.escape(str(r['raw_reads']))}</td><td>{html.escape(str(r['mean_read_length']))}</td><td>{html.escape(str(r['reads_gt_q20']))}</td><td>{r['observed_otus']}</td><td>{r['shannon']:.2f}</td><td>{r['simpson']:.3f}</td><td>{html.escape(str(r['top_species']))}</td></tr>"
+        for r in summary_rows
     )
-    species_fig.update_layout(template="plotly_white", yaxis={"autorange": "reversed"}, margin=dict(l=160, r=20, t=60, b=50))
-
-    class_data = sample_otus.groupby("class", as_index=False)["abundance"].sum().sort_values("abundance", ascending=False)
-    class_fig = px.pie(class_data, names="class", values="abundance", title="Taxonomic composition by class", hole=0.35)
-    class_fig.update_layout(template="plotly_white", margin=dict(l=20, r=20, t=60, b=20))
-
-    top_otus = sample_otus.sort_values("abundance", ascending=False).head(top_n)
-    top_species = species_data.iloc[0]["species"] if not species_data.empty else "none"
-    mean_identity = top_otus["identity"].mean() if not top_otus.empty else 0
-
-    rrna_table = table_html(pd.DataFrame(rrna_rows), max_rows=20) if rrna_rows else "<p>No rRNA stats available.</p>"
-    top_table = table_html(top_otus[["OTU", "species", "genus", "abundance", "identity"]], max_rows=top_n)
-
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>{escape(sample)} overview</title>
-  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-  <style>{REPORT_CSS}</style>
-</head>
-<body>
-  <main class="container">
-    <header><div><div class="pill">BaNaNA sample overview</div><h1>{escape(sample)}</h1><p class="muted">Sequencing quality, rRNA extraction, OTU composition, and taxonomy assignment.</p></div></header>
-    <section class="grid metrics">
-      <div class="metric"><div class="value">{int(float(nanostats.get("number_of_reads", 0) or 0))}</div><div>Filtered reads</div></div>
-      <div class="metric"><div class="value">{nanostats.get("mean_read_length", "NA")}</div><div>Mean read length</div></div>
-      <div class="metric"><div class="value">{parse_q_metric(nanostats.get("Reads >Q20:", ""))[0]:.0f}</div><div>Reads &gt; Q20</div></div>
-      <div class="metric"><div class="value">{int(sample_summary.get("observed_otus", 0))}</div><div>Observed OTUs</div></div>
-    </section>
-    <section class="card"><h2>Sample Interpretation</h2><p>This sample contains {int(sample_summary.get("observed_otus", 0))} observed OTUs with {int(sample_summary.get("reads_assigned_to_otus", 0))} reads represented in the final OTU table. The dominant species-level assignment is <strong>{escape(str(top_species))}</strong>. Mean identity across the top OTUs shown below is {mean_identity:.2f}%.</p></section>
-    <section class="grid">
-      <div class="card half">{fig_html(quality_fig)}</div>
-      <div class="card half">{''.join(rrna_figs) if rrna_figs else '<p>No rRNA plots available.</p>'}</div>
-      <div class="card half">{fig_html(species_fig)}</div>
-      <div class="card half">{fig_html(class_fig)}</div>
-      <div class="card"><h2>rRNA Extraction Summary</h2>{rrna_table}</div>
-      <div class="card"><h2>Top OTUs</h2>{top_table}</div>
-    </section>
-  </main>
-</body>
-</html>
-"""
+    rep = DASHBOARD_TEMPLATE
+    replacements = {
+        '__NSAMPLES__': str(len(summary_rows)),
+        '__TOTALREADS__': str(total_reads),
+        '__MEDOTUS__': str(round(float(med_otus), 1)),
+        '__MEDSHANNON__': f'{float(med_shannon):.2f}',
+        '__SUMMARY_ROWS__': table_rows,
+        '__SUMMARY_DATA__': json.dumps(summary_rows),
+        '__TAX_MATRICES__': json.dumps(taxonomy_matrices),
+    }
+    for k, v in replacements.items():
+        rep = rep.replace(k, v)
+    out_html.write_text(rep, encoding='utf-8')
 
 
-REPORT_CSS = """
-body{font-family:Arial,sans-serif;margin:0;background:#f7f6f2;color:#22201b;line-height:1.5}
-.container{max-width:1240px;margin:0 auto;padding:28px}
-header{margin-bottom:20px}.pill{display:inline-block;background:#e8f1f1;color:#01696f;border-radius:999px;padding:5px 10px;font-weight:700;font-size:13px}
-h1{font-size:42px;margin:8px 0 0}h2{margin:0 0 10px}.muted{color:#6f6b63}
-.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}.metrics{margin-bottom:16px}
-.metric,.card{background:#fbfbf9;border:1px solid #d8d4cc;border-radius:8px;padding:16px;box-shadow:0 6px 20px rgba(0,0,0,.04)}
-.metric{grid-column:span 3}.metric .value{font-size:28px;font-weight:700}.half{grid-column:span 6}.card{grid-column:span 12}
-.summary-table{border-collapse:collapse;width:100%;font-size:14px}.summary-table th,.summary-table td{border:1px solid #ddd;padding:7px 9px;text-align:left}.summary-table th{background:#f1efea}
-@media(max-width:900px){.metric,.half{grid-column:span 12}}
-"""
-
-
-def write_dashboard(output_dir, sample_summary, long_df, nanostats_by_sample, rrna_by_sample, top_n):
-    output_dir.mkdir(parents=True, exist_ok=True)
-    samples = sample_summary["sample"].tolist()
-
-    richness_fig = px.bar(sample_summary, x="sample", y="observed_otus", title="Observed OTUs per sample")
-    reads_fig = px.bar(sample_summary, x="sample", y="reads_assigned_to_otus", title="Reads assigned to final OTUs")
-    quality_rows = []
-    for sample in samples:
-        stats = nanostats_by_sample.get(sample, {})
-        quality_rows.append({
-            "sample": sample,
-            "filtered_reads": float(stats.get("number_of_reads", 0) or 0),
-            "mean_quality": float(stats.get("mean_qual", 0) or 0),
-            "mean_read_length": float(stats.get("mean_read_length", 0) or 0),
-            "q20_percent": parse_q_metric(stats.get("Reads >Q20:", ""))[1],
-        })
-    quality_df = pd.DataFrame(quality_rows)
-    q20_fig = px.bar(quality_df, x="sample", y="q20_percent", title="Reads above Q20 after filtering")
-    length_fig = px.bar(quality_df, x="sample", y="mean_read_length", title="Mean read length after filtering")
-
-    genus_summary = summarize_by_rank(long_df, "genus", top_n)
-    genus_fig = px.bar(genus_summary, x="sample", y="relative_abundance", color="genus", title="Relative composition by genus")
-    class_summary = summarize_by_rank(long_df, "class", top_n)
-    class_fig = px.bar(class_summary, x="sample", y="relative_abundance", color="class", title="Relative composition by class")
-
-    rrna_rows = []
-    for sample, rrnas in rrna_by_sample.items():
-        for rrna, vals in rrnas.items():
-            total = vals.get("total", 0) or 1
-            rrna_rows.append({
-                "sample": sample,
-                "rRNA": rrna,
-                "detected_percent": (vals.get("one", 0) + vals.get("multiple", 0)) / total * 100,
-            })
-    rrna_df = pd.DataFrame(rrna_rows)
-    rrna_fig = px.bar(rrna_df, x="sample", y="detected_percent", color="rRNA", barmode="group", title="rRNA detection")
-
-    for fig in [richness_fig, reads_fig, q20_fig, length_fig, genus_fig, class_fig, rrna_fig]:
-        fig.update_layout(template="plotly_white", margin=dict(l=40, r=20, t=70, b=80))
-
-    links = sample_summary[["sample", "reads_assigned_to_otus", "observed_otus"]].copy()
-    links["report"] = links["sample"].apply(lambda sample: f'<a href="{escape(sample)}_overview.html">{escape(sample)}_overview.html</a>')
-    table = links.to_html(index=False, escape=False, classes="summary-table")
-
-    html = f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>BaNaNA multi-sample dashboard</title>
-  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-  <style>{REPORT_CSS}</style>
-</head>
-<body>
-  <main class="container">
-    <header><div class="pill">BaNaNA dashboard</div><h1>Multi-Sample Dashboard</h1><p class="muted">Study-level overview of read quality, rRNA detection, OTU abundance, and taxonomy composition.</p></header>
-    <section class="grid metrics">
-      <div class="metric"><div class="value">{len(samples)}</div><div>Samples</div></div>
-      <div class="metric"><div class="value">{int(sample_summary["reads_assigned_to_otus"].sum())}</div><div>Reads assigned to OTUs</div></div>
-      <div class="metric"><div class="value">{int(sample_summary["observed_otus"].median())}</div><div>Median observed OTUs</div></div>
-      <div class="metric"><div class="value">{long_df["OTU"].nunique()}</div><div>Total OTUs</div></div>
-    </section>
-    <section class="card"><h2>Sample Reports</h2>{table}</section>
-    <section class="grid">
-      <div class="card half">{fig_html(richness_fig)}</div>
-      <div class="card half">{fig_html(reads_fig)}</div>
-      <div class="card half">{fig_html(q20_fig)}</div>
-      <div class="card half">{fig_html(length_fig)}</div>
-      <div class="card half">{fig_html(rrna_fig)}</div>
-      <div class="card half">{fig_html(class_fig)}</div>
-      <div class="card">{fig_html(genus_fig)}</div>
-    </section>
-  </main>
-</body>
-</html>
-"""
-    (output_dir / "multi_sample_dashboard.html").write_text(html)
+def parse_options():
+    ap = argparse.ArgumentParser(description='Generate BaNaNA biological HTML reports')
+    ap.add_argument('--taxonomy', required=True, help='Final VSEARCH taxonomy.tsv')
+    ap.add_argument('--otu-table', required=True, help='Final otu_table.tsv')
+    ap.add_argument('--output', required=True, help='Main HTML report output')
+    ap.add_argument('--output-dir', default='banana_reports', help='Directory for dashboard and per-sample reports')
+    ap.add_argument('--nanoplot-dirs', nargs='*', default=[], help='NanoPlot output directories')
+    ap.add_argument('--rrna-stats', nargs='*', default=[], help='rRNA extraction stats files')
+    ap.add_argument('--top-n', type=int, default=15, help='Reserved for compatibility')
+    return ap.parse_args()
 
 
 def main():
     args = parse_options()
-    otu_df, sample_cols = load_otu_table(args.otu_table)
-    tax_df = load_taxonomy(args.taxonomy)
-    merged = otu_df.merge(tax_df, on="OTU", how="left")
-    nanostats_by_sample = load_nanostats(args.nanoplot_dirs)
-    rrna_by_sample = load_rrna_stats(args.rrna_stats)
+    outdir = Path(args.output_dir)
+    outdir.mkdir(parents=True, exist_ok=True)
 
-    long_df = merged.melt(
-        id_vars=["OTU", "identity"] + RANKS,
-        value_vars=sample_cols,
-        var_name="sample",
-        value_name="abundance",
-    )
-    long_df["abundance"] = pd.to_numeric(long_df["abundance"], errors="coerce").fillna(0)
-    detected = long_df[long_df["abundance"] > 0].copy()
+    otu, sample_names = load_otu_table(Path(args.otu_table))
+    tax = load_taxonomy(Path(args.taxonomy))
+    merged = otu.merge(tax, on='OTU', how='left')
+    for col in ['Domain', 'Supergroup', 'Division', 'Subdivision', 'Class', 'Order', 'Family', 'Genus', 'Species']:
+        if col not in merged.columns:
+            merged[col] = 'Unassigned'
+        merged[col] = merged[col].fillna('Unassigned')
+    for col in ['Pident', 'Length']:
+        if col not in merged.columns:
+            merged[col] = pd.NA
 
-    all_samples = pd.DataFrame({"sample": sample_cols})
-    sample_totals = (
-        long_df.groupby("sample", as_index=False)["abundance"]
-        .sum()
-        .rename(columns={"abundance": "reads_assigned_to_otus"})
-    )
-    sample_richness = (
-        detected.groupby("sample", as_index=False)["OTU"]
-        .nunique()
-        .rename(columns={"OTU": "observed_otus"})
-    )
-    sample_summary = (
-        all_samples
-        .merge(sample_totals, on="sample", how="left")
-        .merge(sample_richness, on="sample", how="left")
-        .fillna(0)
-    )
-    sample_summary["observed_otus"] = sample_summary["observed_otus"].astype(int)
+    nanostats_by_sample = load_nanostats_by_sample(args.nanoplot_dirs)
+    rrna_stats_by_sample = load_rrna_stats_by_sample(args.rrna_stats)
+    summary = []
+    tax_rank_data = {rank: {} for rank in ['Division', 'Class', 'Family', 'Genus', 'Species']}
+    for sample in sample_names:
+        if sample not in merged.columns:
+            print(f'[WARN] Sample {sample} not found in otu_table.tsv; skipping')
+            continue
+        if sample not in nanostats_by_sample:
+            print(f'[WARN] Missing NanoStats for {sample}; skipping')
+            continue
+        if sample not in rrna_stats_by_sample:
+            print(f'[WARN] Missing rRNA stats for {sample}; skipping')
+            continue
+        all_sequences, rrna = rrna_stats_by_sample[sample]
+        nano = nanostats_by_sample[sample]
+        df = merged[['OTU', sample, 'Domain', 'Supergroup', 'Division', 'Subdivision', 'Class', 'Order', 'Family', 'Genus', 'Species', 'Pident', 'Length']].copy()
+        df[sample] = pd.to_numeric(df[sample], errors='coerce').fillna(0).astype(int)
+        df = df[df[sample] > 0].sort_values(sample, ascending=False)
+        out_html = outdir / f'{sample}_overview.html'
+        row = make_report(sample, df, nano, all_sequences, rrna, out_html)
+        summary.append(row)
+        total_reads = int(df[sample].sum())
+        for rank in tax_rank_data:
+            grp = df.groupby(rank, dropna=False)[sample].sum().sort_values(ascending=False)
+            tax_rank_data[rank][sample] = {str(k) if pd.notnull(k) else 'Unassigned': (float(v) / total_reads * 100 if total_reads else 0) for k, v in grp.items()}
+        print(f'[OK] {sample} -> {out_html}')
+    if summary:
+        pd.DataFrame(summary).to_csv(outdir / 'sample_overview_summary.csv', index=False)
+        print(f'[OK] Summary -> {outdir / "sample_overview_summary.csv"}')
+        taxonomy_matrices = {}
+        ordered_samples = [r['sample'] for r in summary]
+        for rank, by_sample in tax_rank_data.items():
+            totals = {}
+            for mapping in by_sample.values():
+                for taxon, pct in mapping.items():
+                    totals[taxon] = totals.get(taxon, 0) + pct
+            top_taxa = [k for k, _ in sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:20]]
+            z = [[round(by_sample.get(sample, {}).get(taxon, 0), 3) for sample in ordered_samples] for taxon in top_taxa]
+            taxonomy_matrices[rank] = {'samples': ordered_samples, 'taxa': top_taxa, 'z': z}
+        build_dashboard(summary, taxonomy_matrices, outdir / 'multi_sample_dashboard.html')
+        print(f'[OK] Dashboard -> {outdir / "multi_sample_dashboard.html"}')
+        dashboard = outdir / 'multi_sample_dashboard.html'
+        Path(args.output).write_text(dashboard.read_text(encoding='utf-8'), encoding='utf-8')
+        print(f'[OK] Main report -> {args.output}')
+    else:
+        Path(args.output).write_text('<!doctype html><title>BaNaNA report</title><p>No sample reports were generated.</p>', encoding='utf-8')
 
-    otu_totals = otu_df.copy()
-    otu_totals["total_abundance"] = otu_totals[sample_cols].sum(axis=1)
-    otu_totals = otu_totals[["OTU", "total_abundance"]].merge(tax_df[["OTU", "identity", "genus", "species"]], on="OTU", how="left")
-    otu_totals = otu_totals.sort_values("total_abundance", ascending=False)
-
-    class_summary = summarize_by_rank(long_df, "class", args.top_n)
-    genus_summary = summarize_by_rank(long_df, "genus", args.top_n)
-
-    class_fig = px.bar(
-        class_summary,
-        x="sample",
-        y="relative_abundance",
-        color="class",
-        title="Relative taxonomic composition by class",
-        labels={"relative_abundance": "Relative abundance", "sample": "Sample", "class": "Class"},
-    )
-    genus_fig = px.bar(
-        genus_summary,
-        x="sample",
-        y="relative_abundance",
-        color="genus",
-        title="Relative taxonomic composition by genus",
-        labels={"relative_abundance": "Relative abundance", "sample": "Sample", "genus": "Genus"},
-    )
-    richness_fig = px.bar(
-        sample_summary,
-        x="sample",
-        y="observed_otus",
-        title="Observed OTUs per sample",
-        labels={"observed_otus": "Observed OTUs", "sample": "Sample"},
-    )
-    abundance_fig = px.bar(
-        sample_summary,
-        x="sample",
-        y="reads_assigned_to_otus",
-        title="Reads assigned to final OTUs per sample",
-        labels={"reads_assigned_to_otus": "Reads assigned to OTUs", "sample": "Sample"},
-    )
-    top_otu_fig = px.bar(
-        otu_totals.head(args.top_n),
-        x="OTU",
-        y="total_abundance",
-        color="genus",
-        title=f"Top {args.top_n} OTUs by total abundance",
-        labels={"total_abundance": "Total abundance", "genus": "Genus"},
-    )
-
-    for fig in [class_fig, genus_fig, richness_fig, abundance_fig, top_otu_fig]:
-        fig.update_layout(template="plotly_white", legend_title_text="", margin=dict(l=40, r=20, t=70, b=80))
-
-    html = f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>BaNaNA Biological Report</title>
-  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-  <style>
-    body {{ font-family: Arial, sans-serif; margin: 32px; color: #222; }}
-    h1, h2 {{ margin-bottom: 0.3rem; }}
-    .muted {{ color: #666; }}
-    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin: 20px 0; }}
-    .metric {{ border: 1px solid #ddd; padding: 16px; border-radius: 6px; }}
-    .metric .value {{ font-size: 28px; font-weight: 700; }}
-    .plot {{ margin: 26px 0; }}
-    .summary-table {{ border-collapse: collapse; width: 100%; margin: 16px 0 32px; font-size: 14px; }}
-    .summary-table th, .summary-table td {{ border: 1px solid #ddd; padding: 7px 9px; text-align: left; }}
-    .summary-table th {{ background: #f4f4f4; }}
-  </style>
-</head>
-<body>
-  <h1>BaNaNA Biological Report</h1>
-  <p class="muted">Generated from {escape(Path(args.taxonomy).name)} and {escape(Path(args.otu_table).name)}.</p>
-
-  <div class="grid">
-    <div class="metric"><div class="value">{len(sample_cols)}</div><div>Samples</div></div>
-    <div class="metric"><div class="value">{len(otu_df)}</div><div>Final OTUs</div></div>
-    <div class="metric"><div class="value">{int(sample_summary["reads_assigned_to_otus"].sum())}</div><div>Reads assigned to final OTUs</div></div>
-    <div class="metric"><div class="value">{tax_df["identity"].mean():.1f}%</div><div>Mean taxonomy identity</div></div>
-  </div>
-
-  <h2>Sample Summary</h2>
-  {table_html(sample_summary)}
-
-  <div class="plot">{fig_html(richness_fig)}</div>
-  <div class="plot">{fig_html(abundance_fig)}</div>
-  <div class="plot">{fig_html(class_fig)}</div>
-  <div class="plot">{fig_html(genus_fig)}</div>
-  <div class="plot">{fig_html(top_otu_fig)}</div>
-
-  <h2>Top OTUs</h2>
-  {table_html(otu_totals)}
-</body>
-</html>
-"""
-    Path(args.output).write_text(html)
-
-    if args.output_dir:
-        output_dir = Path(args.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        write_dashboard(output_dir, sample_summary, long_df, nanostats_by_sample, rrna_by_sample, args.top_n)
-        for sample in sample_cols:
-            sample_otus = detected[detected["sample"] == sample].copy()
-            sample_stats = sample_summary[sample_summary["sample"] == sample]
-            if sample_stats.empty:
-                sample_stats_dict = {"observed_otus": 0, "reads_assigned_to_otus": 0}
-            else:
-                sample_stats_dict = sample_stats.iloc[0].to_dict()
-            sample_html = sample_report_html(
-                sample=sample,
-                sample_summary=sample_stats_dict,
-                sample_otus=sample_otus,
-                tax_records=tax_df,
-                nanostats=nanostats_by_sample.get(sample, {}),
-                rrna_stats=rrna_by_sample.get(sample, {}),
-                top_n=args.top_n,
-            )
-            (output_dir / f"{sample}_overview.html").write_text(sample_html)
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

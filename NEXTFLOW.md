@@ -103,16 +103,45 @@ Run the full dataset with:
 ./launcher.sh full
 ```
 
-To submit the full dataset to Slurm, run:
+To submit a run to Slurm, set the input paths and run:
 
 ```bash
+export BANANA_DB=/path/to/pr2_or_other_reference.fasta
+export BANANA_BARCODE_DIR=/path/to/per_barcode
+export BANANA_OUTDIR=/path/to/results/banana_run
+export BANANA_WORKDIR=/path/to/work/banana_run
+export BANANA_CONTAINER=/path/to/banana.sif
 sbatch launcher.sh full-slurm
 ```
 
+The launcher automatically creates:
+
+```text
+<BANANA_OUTDIR>/samplesheet.tsv
+```
+
+from every `barcode*` subdirectory directly under `BANANA_BARCODE_DIR`. For
+example, `/path/to/per_barcode/barcode01` becomes:
+
+```text
+sample	fastq
+barcode01	/path/to/per_barcode/barcode01
+```
+
+If you want to manually include/exclude or rename barcode inputs, provide an
+explicit samplesheet instead:
+
+```bash
+export BANANA_SAMPLESHEET=/path/to/samplesheet.tsv
+```
+
+`BANANA_SAMPLESHEET` takes priority over `BANANA_BARCODE_DIR`.
+
 This starts Nextflow as the Slurm controller job, and Nextflow submits the
-individual pipeline processes as separate Slurm jobs. The controller job asks
-for 1 CPU, 4 GB memory, and 12 hours; the individual process resources are set
-in `nextflow.config`.
+individual heavy pipeline processes as separate Slurm jobs. Very small
+bookkeeping/reporting processes are kept local inside the controller job to
+avoid scheduling overhead. The controller job asks for 1 CPU, 8 GB memory, and
+24 hours; the individual process resources are set in `nextflow.config`.
 
 If your cluster requires a partition/queue for the worker jobs, set it in the
 `slurm` profile in `nextflow.config`, for example:
@@ -163,15 +192,29 @@ file provides the per-barcode report.
 
 The `slurm` profile uses these initial estimates:
 
-- Light file/Python steps: 1 CPU, 4-8 GB, 2-12 hours.
-- Per-barcode filtering, NanoPlot, Barrnap, clustering, Minimap, and Racon:
-  2-8 CPUs depending on the process, 8-16 GB, 24 hours.
+- Controller-local light steps: 1 CPU, 4 GB, 4 hours, `maxForks = 4`.
+  This applies to clustering-threshold calculation, sample-name tagging,
+  merging polished FASTA files, removing N-rich OTUs, optional taxonomy-table
+  formatting, OTU-table creation, and the HTML biological report. The report
+  step is allowed 8 GB.
+- FASTQ preparation: 1 CPU, 16 GB, 24 hours. This can be I/O-heavy if a sample
+  is a directory of many gzipped chunks.
+- Filtlong: 2 CPUs, 16 GB, 24 hours per sample.
+- NanoPlot: `--threads` CPUs, 16 GB, 24 hours per sample.
+- Barrnap: `--threads` CPUs, 8 GB, 24 hours per sample.
+- rRNA extraction: 1 CPU, 8 GB, 12 hours per sample.
+- Per-sample VSEARCH error clustering, MAFFT consensus, and Minimap:
+  `--threads` CPUs, 16 GB, 24 hours per sample.
+- Racon polishing: `--threads` CPUs, 16 GB, 24 hours per sample.
 - Final clustering: 8 CPUs, 32 GB, 24 hours.
 - Database-heavy chimera removal and taxonomy: 8 CPUs, 64 GB, 48 hours.
 
 If a process needs more time or memory, adjust the matching `withLabel` or
 `withName` block in `nextflow.config` and resubmit with the same launcher
-command. The launcher uses `-resume`, so completed tasks are reused.
+command. The launcher uses `-resume`, so completed tasks are reused. If
+`CHIMERA_REMOVAL` or `TAXONOMY` fail with memory pressure on the full database,
+increase those two jobs first to 96-128 GB before changing the rest of the
+pipeline.
 
 ## Notes
 
