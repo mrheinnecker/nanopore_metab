@@ -137,6 +137,15 @@ export BANANA_SAMPLESHEET=/path/to/samplesheet.tsv
 
 `BANANA_SAMPLESHEET` takes priority over `BANANA_BARCODE_DIR`.
 
+By default, the launcher starts Nextflow from `BANANA_OUTDIR`. This keeps
+Nextflow metadata such as `.nextflow/history.lock` in a writable run directory
+instead of the repository. If your cluster needs a different writable launch
+directory, set:
+
+```bash
+export BANANA_LAUNCHDIR=/path/to/writable/launch_dir
+```
+
 This starts Nextflow as the Slurm controller job, and Nextflow submits the
 individual heavy pipeline processes as separate Slurm jobs. Very small
 bookkeeping/reporting processes are kept local inside the controller job to

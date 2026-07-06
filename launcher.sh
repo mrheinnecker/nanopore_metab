@@ -23,6 +23,24 @@ workdir="${BANANA_WORKDIR:-work}"
 container="${BANANA_CONTAINER:-${repo_dir}/containers/banana.sif}"
 samplesheet="${BANANA_SAMPLESHEET:-}"
 barcode_dir="${BANANA_BARCODE_DIR:-}"
+launchdir="${BANANA_LAUNCHDIR:-}"
+
+case "$outdir" in
+    /*) ;;
+    *) outdir="${repo_dir}/${outdir}" ;;
+esac
+case "$workdir" in
+    /*) ;;
+    *) workdir="${repo_dir}/${workdir}" ;;
+esac
+if [ -z "$launchdir" ]; then
+    launchdir="$outdir"
+else
+    case "$launchdir" in
+        /*) ;;
+        *) launchdir="${repo_dir}/${launchdir}" ;;
+    esac
+fi
 
 case "$mode" in
     full)
@@ -36,8 +54,6 @@ case "$mode" in
         exit 2
         ;;
 esac
-
-cd "$repo_dir"
 
 if [ -z "$samplesheet" ]; then
     if [ -z "$barcode_dir" ]; then
@@ -72,7 +88,11 @@ if [ -z "$samplesheet" ]; then
     echo "Created samplesheet: $samplesheet" >&2
 fi
 
-nextflow run main.nf \
+mkdir -p "$launchdir"
+cd "$launchdir"
+
+nextflow run "$repo_dir/main.nf" \
+    -c "$repo_dir/nextflow.config" \
     -profile "$profiles" \
     -resume \
     -work-dir "$workdir" \
