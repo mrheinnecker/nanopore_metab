@@ -1,0 +1,32 @@
+Bootstrap: docker
+From: mambaorg/micromamba:1.5.8
+
+%labels
+    Author BaNaNA
+    Description BaNaNA Nextflow runtime with Filtlong, barrnap, NanoPlot, VSEARCH, minimap2, MAFFT, racon, Biopython, and joblib
+
+%post
+    micromamba install -y -n base -c conda-forge -c bioconda \
+        python=3.9 \
+        procps-ng \
+        biopython \
+        joblib \
+        filtlong=0.2.1 \
+        barrnap=0.9 \
+        nanoplot=1.46.1 \
+        vsearch=2.8.0 \
+        minimap2=2.24 \
+        mafft=7.310 \
+        racon=1.5.0
+    micromamba clean --all --yes
+
+%environment
+    export PATH=/opt/conda/bin:$PATH
+    export OPENBLAS_NUM_THREADS=1
+    export OMP_NUM_THREADS=1
+    export MKL_NUM_THREADS=1
+    export NUMEXPR_NUM_THREADS=1
+    export LC_ALL=C
+
+%runscript
+    exec "$@"
