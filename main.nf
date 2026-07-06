@@ -61,7 +61,7 @@ def samplesheetToChannel(samplesheet) {
 process FILTLONG {
     tag "$sample"
     label 'filtlong'
-    publishDir "${params.outdir}/intermediate/01_filtlong", mode: 'copy'
+    publishDir "${params.outdir}/intermediate/01_filtlong", mode: 'copy', overwrite: true
 
     input:
     tuple val(sample), path(reads)
@@ -115,7 +115,7 @@ process PREPARE_READS {
 process FASTQ_TO_FASTA {
     tag "$sample"
     label 'base'
-    publishDir "${params.outdir}/intermediate/02_fastq_to_fasta", mode: 'copy'
+    publishDir "${params.outdir}/intermediate/02_fastq_to_fasta", mode: 'copy', overwrite: true
 
     input:
     tuple val(sample), path(reads)
@@ -133,7 +133,7 @@ process BARRNAP {
     tag "$sample"
     label 'barrnap'
     cpus { params.threads as int }
-    publishDir "${params.outdir}/intermediate/03_barrnap", mode: 'copy'
+    publishDir "${params.outdir}/intermediate/03_barrnap", mode: 'copy', overwrite: true
 
     input:
     tuple val(sample), path(fasta)
@@ -159,7 +159,7 @@ process BARRNAP {
 process EXTRACT_RRNA {
     tag "$sample"
     label 'python_tools'
-    publishDir "${params.outdir}/intermediate/04_rrna_extracted", mode: 'copy'
+    publishDir "${params.outdir}/intermediate/04_rrna_extracted", mode: 'copy', overwrite: true
 
     input:
     tuple val(sample), path(rrna_calls)
@@ -184,7 +184,7 @@ process NANOPLOT {
     tag "$sample"
     label 'nanoplot'
     cpus { params.threads as int }
-    publishDir "${params.outdir}/intermediate/05_nanoplot", mode: 'copy'
+    publishDir "${params.outdir}/intermediate/05_nanoplot", mode: 'copy', overwrite: true
 
     input:
     tuple val(sample), path(reads)
@@ -221,7 +221,7 @@ EOF
 process CLUSTER_THRESHOLD {
     tag "$sample"
     label 'python_tools'
-    publishDir "${params.outdir}/intermediate/06_cluster_threshold", mode: 'copy'
+    publishDir "${params.outdir}/intermediate/06_cluster_threshold", mode: 'copy', overwrite: true
 
     input:
     tuple val(sample), path(nanoplot_dir)
@@ -244,7 +244,7 @@ process ERROR_CLUSTERING {
     tag "$sample"
     label 'python_tools'
     cpus { params.threads as int }
-    publishDir "${params.outdir}/intermediate/07_error_clustering", mode: 'copy'
+    publishDir "${params.outdir}/intermediate/07_error_clustering", mode: 'copy', overwrite: true
 
     input:
     tuple val(sample), path(rrna_fasta), path(threshold)
@@ -269,7 +269,7 @@ process CONSENSUS {
     tag "$sample"
     label 'python_tools'
     cpus { params.threads as int }
-    publishDir "${params.outdir}/intermediate/08_consensus", mode: 'copy'
+    publishDir "${params.outdir}/intermediate/08_consensus", mode: 'copy', overwrite: true
 
     input:
     tuple val(sample), path(error_clusters), path(rrna_fasta)
@@ -298,7 +298,7 @@ process MINIMAP {
     tag "$sample"
     label 'python_tools'
     cpus { params.threads as int }
-    publishDir "${params.outdir}/intermediate/09_minimap", mode: 'copy'
+    publishDir "${params.outdir}/intermediate/09_minimap", mode: 'copy', overwrite: true
 
     input:
     tuple val(sample), path(consensus), path(error_clusters), path(rrna_fasta)
@@ -332,7 +332,7 @@ process RACON {
     tag "$sample"
     label 'racon'
     cpus { params.threads as int }
-    publishDir "${params.outdir}/intermediate/10_racon", mode: 'copy'
+    publishDir "${params.outdir}/intermediate/10_racon", mode: 'copy', overwrite: true
 
     input:
     tuple val(sample), path(paf), path(error_clusters), path(rrna_fasta), path(consensus)
@@ -365,7 +365,7 @@ process RACON {
 process ADD_SAMPLE_NAMES {
     tag "$sample"
     label 'python_tools'
-    publishDir "${params.outdir}/intermediate/11_named_polished", mode: 'copy'
+    publishDir "${params.outdir}/intermediate/11_named_polished", mode: 'copy', overwrite: true
 
     input:
     tuple val(sample), path(polished), path(error_clusters)
@@ -390,7 +390,7 @@ process ADD_SAMPLE_NAMES {
 
 process MERGE_SAMPLES {
     label 'base'
-    publishDir "${params.outdir}/intermediate/12_merged", mode: 'copy'
+    publishDir "${params.outdir}/intermediate/12_merged", mode: 'copy', overwrite: true
 
     input:
     path named_fastas
@@ -407,7 +407,7 @@ process MERGE_SAMPLES {
 process CHIMERA_REMOVAL {
     label 'python_tools'
     cpus { params.threads as int }
-    publishDir "${params.outdir}/intermediate/13_chimeras", mode: 'copy'
+    publishDir "${params.outdir}/intermediate/13_chimeras", mode: 'copy', overwrite: true
 
     input:
     path merged
@@ -443,7 +443,7 @@ process CHIMERA_REMOVAL {
 process FINAL_CLUSTERING {
     label 'python_tools'
     cpus { params.threads as int }
-    publishDir "${params.outdir}/intermediate/14_final_clustering", mode: 'copy'
+    publishDir "${params.outdir}/intermediate/14_final_clustering", mode: 'copy', overwrite: true
 
     input:
     path nonchimeras
@@ -470,7 +470,7 @@ process FINAL_CLUSTERING {
 
 process REMOVE_N_SEQS {
     label 'python_tools'
-    publishDir "${params.outdir}/final", mode: 'copy'
+    publishDir "${params.outdir}/final", mode: 'copy', overwrite: true
 
     input:
     path pre_otus
@@ -490,7 +490,7 @@ process REMOVE_N_SEQS {
 process TAXONOMY {
     label 'python_tools'
     cpus { params.threads as int }
-    publishDir "${params.outdir}/final", mode: 'copy'
+    publishDir "${params.outdir}/final", mode: 'copy', overwrite: true
 
     input:
     path otus
@@ -517,7 +517,7 @@ process TAXONOMY {
 
 process TAXONOMY_TABLE {
     label 'python_tools'
-    publishDir "${params.outdir}/final", mode: 'copy'
+    publishDir "${params.outdir}/final", mode: 'copy', overwrite: true
 
     input:
     path taxonomy
@@ -537,7 +537,7 @@ process TAXONOMY_TABLE {
 process ABUNDANCE {
     tag "$sample"
     label 'python_tools'
-    publishDir "${params.outdir}/intermediate/15_abundance", mode: 'copy'
+    publishDir "${params.outdir}/intermediate/15_abundance", mode: 'copy', overwrite: true
 
     input:
     tuple val(sample), path(error_clusters)
@@ -570,7 +570,7 @@ process ABUNDANCE {
 
 process OTU_TABLE {
     label 'python_tools'
-    publishDir "${params.outdir}/final", mode: 'copy'
+    publishDir "${params.outdir}/final", mode: 'copy', overwrite: true
 
     input:
     path taxonomy
@@ -593,7 +593,7 @@ process OTU_TABLE {
 
 process BIOLOGICAL_REPORT {
     label 'python_tools'
-    publishDir "${params.outdir}/final", mode: 'copy'
+    publishDir "${params.outdir}/final", mode: 'copy', overwrite: true
 
     input:
     path taxonomy
