@@ -11,6 +11,9 @@ nextflow.enable.dsl = 2
 params.samplesheet = params.samplesheet ?: null
 params.outdir = params.outdir ?: 'results/savont_run'
 params.threads = params.threads ?: 8
+params.trim_threads = params.trim_threads ?: params.threads
+params.savont_threads = params.savont_threads ?: params.threads
+params.taxonomy_threads = params.taxonomy_threads ?: params.threads
 
 params.kingdom = params.kingdom ?: 'euk'
 params.pooled_samples = params.pooled_samples ?: false
@@ -21,6 +24,7 @@ params.pr2_db = params.pr2_db ?: null
 params.db_id = params.db_id ?: 0.7
 params.db_query_cov = params.db_query_cov ?: 0.9
 params.enable_taxonomy_table = params.enable_taxonomy_table != null ? params.enable_taxonomy_table : true
+params.enable_biological_report = params.enable_biological_report != null ? params.enable_biological_report : true
 
 params.min_read_length = params.min_read_length ?: 1100
 params.max_read_length = params.max_read_length ?: 2000
@@ -126,7 +130,7 @@ process PREPARE_READS {
 process TRIM_18S {
     tag "$sample"
     label 'savont_trim18s'
-    cpus { params.threads as int }
+    cpus { params.trim_threads as int }
     publishDir "${params.outdir}/intermediate/01_trim18s", mode: 'copy', overwrite: true
 
     input:
@@ -154,7 +158,7 @@ process TRIM_18S {
 process SAVONT_ASV_SAMPLE {
     tag "$sample"
     label 'savont_asv'
-    cpus { params.threads as int }
+    cpus { params.savont_threads as int }
     publishDir "${params.outdir}/asv", mode: 'copy', overwrite: true
 
     input:
@@ -184,7 +188,7 @@ process SAVONT_ASV_SAMPLE {
 
 process SAVONT_ASV_POOLED {
     label 'savont_asv'
-    cpus { params.threads as int }
+    cpus { params.savont_threads as int }
     publishDir "${params.outdir}/asv", mode: 'copy', overwrite: true
 
     input:
@@ -217,7 +221,7 @@ process SAVONT_ASV_POOLED {
 process SAVONT_CLASSIFY {
     tag "$sample"
     label 'savont_classify'
-    cpus { params.threads as int }
+    cpus { params.taxonomy_threads as int }
     publishDir "${params.outdir}/classification", mode: 'copy', overwrite: true
 
     input:
@@ -240,7 +244,7 @@ process SAVONT_CLASSIFY {
 process PR2_TAXONOMY {
     tag "$sample"
     label 'savont_taxonomy'
-    cpus { params.threads as int }
+    cpus { params.taxonomy_threads as int }
     publishDir "${params.outdir}/taxonomy", mode: 'copy', overwrite: true
 
     input:
@@ -278,7 +282,7 @@ process PR2_TAXONOMY_TABLE {
     path scripts_dir
 
     output:
-    tuple val(sample), path("pr2_${sample}/taxonomy_table.tsv"), emit: table
+    tuple val(sample), path("pr2_${sample}"), emit: table
 
     script:
     """
@@ -290,6 +294,31 @@ process PR2_TAXONOMY_TABLE {
     else
         printf 'OTU\\tPident\\tAccession\\tDomain\\tSupergroup\\tDivision\\tSubdivision\\tClass\\tOrder\\tFamily\\tGenus\\tSpecies\\tLength\\n' > pr2_${sample}/taxonomy_table.tsv
     fi
+    """
+}
+
+process SAVONT_BIOLOGICAL_REPORT {
+    label 'savont_report'
+    publishDir "${params.outdir}/final", mode: 'copy', overwrite: true
+
+    input:
+    path trim_summaries
+    path asv_dirs
+    path taxonomy_tables
+    path scripts_dir
+
+    output:
+    path "savont_biological_report.html", emit: report
+    path "savont_reports", emit: report_dir
+
+    script:
+    """
+    python ${scripts_dir}/savont_biological_report.py \\
+        --trim-summaries ${trim_summaries} \\
+        --asv-dirs ${asv_dirs} \\
+        --taxonomy-tables ${taxonomy_tables} \\
+        --output savont_biological_report.html \\
+        --output-dir savont_reports
     """
 }
 
@@ -353,6 +382,12 @@ workflow {
         PR2_TAXONOMY(pr2_input_ch, pr2_database_ch)
         if (truthy(params.enable_taxonomy_table)) {
             PR2_TAXONOMY_TABLE(PR2_TAXONOMY.out.taxonomy, scripts_ch)
+            if (truthy(params.enable_biological_report)) {
+                trim_summaries_ch = TRIM_18S.out.stats.map { sample, summary -> summary }.collect()
+                report_asv_dirs_ch = asv_dirs_ch.map { sample, dir -> dir }.collect()
+                taxonomy_tables_ch = PR2_TAXONOMY_TABLE.out.table.map { sample, table -> table }.collect()
+                SAVONT_BIOLOGICAL_REPORT(trim_summaries_ch, report_asv_dirs_ch, taxonomy_tables_ch, scripts_ch)
+            }
         }
     }
 

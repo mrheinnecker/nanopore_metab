@@ -129,6 +129,18 @@ Outputs are published under:
 
 For pooled Savont mode, the taxonomy directory is `pr2_pooled`.
 
+When `--enable_biological_report true` is enabled, which is the default, the
+workflow also writes:
+
+```text
+<outdir>/final/savont_biological_report.html
+<outdir>/final/savont_reports/multi_sample_dashboard.html
+<outdir>/final/savont_reports/<sample>_overview.html
+```
+
+The report summarizes 18S trimming, ASV counts and depths, diversity metrics,
+and PR2 taxonomic composition.
+
 ## Optional Savont Classification
 
 Savont classification expects a Savont database directory, for example one
@@ -200,6 +212,61 @@ The workflow exposes the common `savont asv` controls:
 For 18S regions extracted from longer eukaryotic operons, adjust
 `--min_read_length` and `--max_read_length` to match the expected 18S interval
 after trimming.
+
+## Slurm HPC Profile
+
+The combined Slurm and Singularity profile is:
+
+```bash
+nextflow -C savont.config run savont.nf \
+  -profile hpc \
+  -work-dir /path/to/scratch/savont_work \
+  --samplesheet /path/to/samplesheet.tsv \
+  --outdir /path/to/results/savont_run \
+  --container /path/to/savont.sif \
+  --pr2_db /path/to/pr2_version_5.1.1_SSU_taxo_long.fasta
+```
+
+Use a scratch/work filesystem for `-work-dir`; avoid slow network home
+directories when possible.
+
+### Thread Controls
+
+The workflow has separate thread parameters for the expensive stages:
+
+- `--trim_threads`: Barrnap-based 18S trimming. HPC default: `4`.
+- `--savont_threads`: `savont asv`. HPC default: `8`.
+- `--taxonomy_threads`: VSEARCH PR2 taxonomy and optional Savont classification. HPC default: `8`.
+
+The old `--threads` parameter remains as a convenience fallback for all three
+when the specific parameter is not set.
+
+### Concurrency Controls
+
+The HPC profile also caps how many jobs of each class are submitted at once:
+
+- `--base_max_forks`, default `8`
+- `--trim_max_forks`, default `4`
+- `--savont_max_forks`, default `2`
+- `--taxonomy_max_forks`, default `2`
+- `--report_max_forks`, default `1`
+
+For example, with the defaults, at most two Savont ASV jobs run concurrently,
+each with eight CPUs. That caps that stage at roughly sixteen CPUs in flight.
+
+For a larger cluster allocation, increase both per-task threads and forks:
+
+```bash
+--savont_threads 12 --savont_max_forks 4 \
+--taxonomy_threads 12 --taxonomy_max_forks 4
+```
+
+For a shared or busy cluster, keep forks low:
+
+```bash
+--savont_threads 8 --savont_max_forks 1 \
+--taxonomy_threads 8 --taxonomy_max_forks 1
+```
 
 ## Long-Term Merge Point With BaNaNA
 
