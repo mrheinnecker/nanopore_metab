@@ -17,6 +17,10 @@ params.pooled_samples = params.pooled_samples ?: false
 params.savont_db = params.savont_db ?: null
 params.classifier = params.classifier ?: 'none'
 params.export_qiime = params.export_qiime ?: false
+params.pr2_db = params.pr2_db ?: null
+params.db_id = params.db_id ?: 0.7
+params.db_query_cov = params.db_query_cov ?: 0.9
+params.enable_taxonomy_table = params.enable_taxonomy_table != null ? params.enable_taxonomy_table : true
 
 params.min_read_length = params.min_read_length ?: 1100
 params.max_read_length = params.max_read_length ?: 2000
@@ -233,6 +237,62 @@ process SAVONT_CLASSIFY {
     """
 }
 
+process PR2_TAXONOMY {
+    tag "$sample"
+    label 'savont_taxonomy'
+    cpus { params.threads as int }
+    publishDir "${params.outdir}/taxonomy", mode: 'copy', overwrite: true
+
+    input:
+    tuple val(sample), path(asv_dir), path(final_asvs)
+    path database
+
+    output:
+    tuple val(sample), path("pr2_${sample}/taxonomy.tsv"), path("pr2_${sample}/final_asvs.fasta"), emit: taxonomy
+
+    script:
+    """
+    mkdir -p pr2_${sample}
+    cp ${final_asvs} pr2_${sample}/final_asvs.fasta
+    if grep -q '^>' ${final_asvs}; then
+        vsearch \\
+            --usearch_global ${final_asvs} \\
+            --db ${database} \\
+            --id ${params.db_id} \\
+            --threads ${task.cpus} \\
+            --blast6out pr2_${sample}/taxonomy.tsv \\
+            --query_cov ${params.db_query_cov}
+    else
+        touch pr2_${sample}/taxonomy.tsv
+    fi
+    """
+}
+
+process PR2_TAXONOMY_TABLE {
+    tag "$sample"
+    label 'savont_taxonomy'
+    publishDir "${params.outdir}/taxonomy", mode: 'copy', overwrite: true
+
+    input:
+    tuple val(sample), path(taxonomy), path(final_asvs)
+    path scripts_dir
+
+    output:
+    tuple val(sample), path("pr2_${sample}/taxonomy_table.tsv"), emit: table
+
+    script:
+    """
+    mkdir -p pr2_${sample}
+    if [ -s ${taxonomy} ]; then
+        python ${scripts_dir}/get_taxonomy_table.py \\
+            -i ${taxonomy} \\
+            -o pr2_${sample}/taxonomy_table.tsv
+    else
+        printf 'OTU\\tPident\\tAccession\\tDomain\\tSupergroup\\tDivision\\tSubdivision\\tClass\\tOrder\\tFamily\\tGenus\\tSpecies\\tLength\\n' > pr2_${sample}/taxonomy_table.tsv
+    fi
+    """
+}
+
 process SAVONT_EXPORT {
     label 'savont_base'
     publishDir "${params.outdir}/export", mode: 'copy', overwrite: true
@@ -280,6 +340,20 @@ workflow {
     if (classifier != 'none') {
         database_ch = Channel.value(file(params.savont_db, checkIfExists: true))
         SAVONT_CLASSIFY(asv_dirs_ch, database_ch)
+    }
+
+    if (params.pr2_db != null && params.pr2_db.toString().trim() != '') {
+        pr2_database_ch = Channel.value(file(params.pr2_db, checkIfExists: true))
+        scripts_ch = Channel.value(file("${projectDir}/scripts", checkIfExists: true))
+        if (truthy(params.pooled_samples)) {
+            pr2_input_ch = SAVONT_ASV_POOLED.out.asv_dir.map { dir, final_asvs, feature_table, final_clusters -> tuple('pooled', dir, final_asvs) }
+        } else {
+            pr2_input_ch = SAVONT_ASV_SAMPLE.out.asv_dir.map { sample, dir, final_asvs, feature_table, final_clusters -> tuple(sample, dir, final_asvs) }
+        }
+        PR2_TAXONOMY(pr2_input_ch, pr2_database_ch)
+        if (truthy(params.enable_taxonomy_table)) {
+            PR2_TAXONOMY_TABLE(PR2_TAXONOMY.out.taxonomy, scripts_ch)
+        }
     }
 
     if (truthy(params.export_qiime)) {

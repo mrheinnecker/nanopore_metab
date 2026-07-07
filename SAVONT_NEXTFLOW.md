@@ -9,6 +9,7 @@ FASTQ
   -> normalize sample FASTQ
   -> Barrnap-guided 18S trimming with quality preservation
   -> savont asv
+  -> optional PR2 annotation with VSEARCH
   -> optional savont classify or savont sintax
   -> optional savont export
 ```
@@ -36,8 +37,8 @@ or:
 singularity build containers/savont.sif containers/savont.def
 ```
 
-The build installs Barrnap, Python `xopen`, Rust/Cargo build tools, and then
-builds the local Savont checkout into `/usr/local/bin/savont`.
+The build installs Barrnap, VSEARCH, Python `xopen`, Rust/Cargo build tools,
+and then builds the local Savont checkout into `/usr/local/bin/savont`.
 
 ## Samplesheet
 
@@ -90,6 +91,45 @@ results/savont_pooled/asv/savont_pooled/
 ```
 
 ## Optional Classification
+
+## Optional PR2 Annotation
+
+To annotate Savont ASVs with a PR2 FASTA database using the same VSEARCH style
+as BaNaNA, pass `--pr2_db`:
+
+```bash
+nextflow -C savont.config run savont.nf \
+  -profile singularity \
+  --samplesheet samplesheet.tsv \
+  --outdir results/savont_pr2 \
+  --pr2_db /mnt/c/Users/rheinnec/Documents/taxseq/databases/pr2_version_5.1.1_SSU_taxo_long.fasta
+```
+
+The workflow runs:
+
+```bash
+vsearch --usearch_global final_asvs.fasta \
+  --db <pr2_db> \
+  --id <db_id> \
+  --query_cov <db_query_cov>
+```
+
+Defaults match the BaNaNA Nextflow defaults:
+
+- `--db_id 0.7`
+- `--db_query_cov 0.9`
+- `--enable_taxonomy_table true`
+
+Outputs are published under:
+
+```text
+<outdir>/taxonomy/pr2_<sample>/taxonomy.tsv
+<outdir>/taxonomy/pr2_<sample>/taxonomy_table.tsv
+```
+
+For pooled Savont mode, the taxonomy directory is `pr2_pooled`.
+
+## Optional Savont Classification
 
 Savont classification expects a Savont database directory, for example one
 created by `savont download`.

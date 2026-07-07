@@ -12,6 +12,7 @@ From: mambaorg/micromamba:1.5.8
     micromamba install -y -n base -c conda-forge -c bioconda \
         python=3.12 \
         barrnap=0.9 \
+        vsearch=2.8.0 \
         xopen \
         rust \
         cmake \

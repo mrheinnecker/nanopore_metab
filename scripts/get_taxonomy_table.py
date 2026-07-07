@@ -13,23 +13,47 @@ def importing(file):
 	input_list = []
 	with open(file) as vsearch:
 		for line in vsearch.readlines():
-			input_list.append(line.split('\t'))
+			if line.strip():
+				input_list.append(line.rstrip('\n').split('\t'))
 	return input_list
+
+
+def parse_subject(subject):
+	"""
+	Parse supported PR2 subject header formats.
+
+	Supported examples:
+	- accession;tax=d:Eukaryota,...
+	- accession|18S_rRNA|nucleus|clone|Eukaryota|...|Species
+	"""
+	if ';' in subject:
+		parts = subject.split(';')
+		accession = parts[0]
+		tax_part = parts[1].replace('tax=', '') if len(parts) > 1 else ''
+		taxonomy = [part.split(':', 1)[1] if ':' in part else part for part in tax_part.split(',') if part]
+		return accession, taxonomy
+
+	parts = subject.split('|')
+	accession = parts[0]
+	taxonomy = parts[4:13] if len(parts) > 4 else []
+	return accession, taxonomy
 
 
 def create_dict(imported_list):
 	file_dict = []
 	for rec in imported_list:
-		rec_dict = {'qseqid': rec[0], 'seqacc': rec[1].split(';')[0], 'seqtax': rec[1].split(';')[1], 'pident': rec[2], 'length': rec[3]}
+		seqacc, seqtax = parse_subject(rec[1])
+		rec_dict = {'qseqid': rec[0], 'seqacc': seqacc, 'seqtax': seqtax, 'pident': rec[2], 'length': rec[3]}
 		file_dict.append(rec_dict)
 	return file_dict
 
 
 def modify_seqtax(data):
     for entry in data:
-        seqtax = entry['seqtax'].replace('tax=', '')
-        parts = [part.split(':')[1] for part in seqtax.split(',')]
-        entry['seqtax'] = '\t'.join(parts)
+        parts = entry['seqtax'][:]
+        if len(parts) < 9:
+            parts.extend([''] * (9 - len(parts)))
+        entry['seqtax'] = '\t'.join(parts[:9])
     return data
 
 
