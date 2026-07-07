@@ -1,0 +1,40 @@
+Bootstrap: docker
+From: mambaorg/micromamba:1.5.8
+
+%files
+    ../savont /opt/savont
+
+%labels
+    Author BaNaNA
+    Description Standalone Savont runtime with Barrnap, Python trim18s helpers, and locally built Savont
+
+%post
+    micromamba install -y -n base -c conda-forge -c bioconda \
+        python=3.12 \
+        barrnap=0.9 \
+        xopen \
+        rust \
+        cmake \
+        make \
+        git \
+        pkg-config \
+        compilers
+
+    export PATH=/opt/conda/bin:$PATH
+    rustc --version
+    cargo --version
+
+    cd /opt/savont
+    cargo install --locked --path . --root /usr/local
+    micromamba clean --all --yes
+
+%environment
+    export PATH=/opt/conda/bin:/usr/local/bin:$PATH
+    export OPENBLAS_NUM_THREADS=1
+    export OMP_NUM_THREADS=1
+    export MKL_NUM_THREADS=1
+    export NUMEXPR_NUM_THREADS=1
+    export LC_ALL=C
+
+%runscript
+    exec "$@"

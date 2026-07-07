@@ -1,0 +1,285 @@
+Installation
+
+conda create -n savont18s \
+    -c conda-forge \
+    -c bioconda \
+    python=3.12 \
+    barrnap \
+    seqkit \
+    rust \
+    cargo \
+    git
+
+Then activate it:
+
+conda activate savont18s
+
+Finally, install Savont:
+
+git clone https://github.com/bluenote-1577/savont.git
+cd savont
+cargo install --path .
+
+
+
+
+# trim18s: Quality-Preserving Extraction of 18S rRNA Reads for Savont
+
+## Overview
+
+`trim18s` is a preprocessing pipeline for long-read ribosomal RNA amplicon sequencing data. It is designed for datasets spanning the complete eukaryotic ribosomal operon (e.g. 18S–ITS1–5.8S–ITS2–28S) where downstream analysis focuses on the 18S rRNA gene.
+
+The pipeline uses **Barrnap** to identify the location of ribosomal RNA genes within each sequencing read and then extracts the **18S rRNA region directly from the original FASTQ file**, preserving the associated base quality scores. The resulting trimmed FASTQ files are suitable for downstream denoising with **Savont**.
+
+Unlike workflows that rely on Barrnap's FASTA output, this approach retains the original quality information, allowing quality-aware tools such as Savont to operate on the extracted sequences.
+
+---
+
+# Workflow
+
+```
+Raw FASTQ
+     │
+     ▼
+Barrnap
+(Infernal covariance models)
+     │
+     ▼
+GFF annotations
+     │
+     ▼
+Locate longest 18S feature
+     │
+     ▼
+Trim original FASTQ
+(sequence + quality)
+     │
+     ▼
+18S FASTQ
+     │
+     ▼
+Savont ASV inference
+```
+
+
+## Pipeline Execution
+
+The preprocessing workflow is coordinated by `trim18s.py`, which orchestrates the individual modules responsible for annotation, trimming, and reporting.
+
+```text
+                          User
+                           │
+                           ▼
+                    trim18s.py
+                           │
+            ┌──────────────┼──────────────┐
+            │              │              │
+            ▼              ▼              ▼
+      Parse CLI      Setup logging   Discover FASTQs
+                           │
+                           ▼
+                 Process each FASTQ
+             (serial or multiprocessing)
+                           │
+                           ▼
+                    worker.py
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+        ▼                  ▼                  ▼
+   barrnap.py         fastq.py            QC tracking
+        │                  │
+        │                  │
+        ▼                  │
+ Run Barrnap               │
+ (Infernal CM search)      │
+        │                  │
+        ▼                  │
+ Parse GFF stream          │
+        │                  │
+        └──────────┬───────┘
+                   ▼
+         Select longest 18S feature
+                   │
+                   ▼
+      Trim sequence and quality scores
+                   │
+                   ▼
+        Write sample.18S.fastq.gz
+                   │
+                   ▼
+        Return per-sample statistics
+                   │
+                   ▼
+                 qc.py
+                   │
+        ┌──────────┴──────────┐
+        ▼                     ▼
+  trim18s.summary.tsv    Console summary
+```
+
+### Module Responsibilities
+
+| Module       | Responsibility                                                                                        |
+| ------------ | ----------------------------------------------------------------------------------------------------- |
+| `trim18s.py` | Entry point, command-line interface, sample discovery, multiprocessing, and orchestration.            |
+| `worker.py`  | Processes a single FASTQ file, coordinates annotation, trimming, and statistics collection.           |
+| `barrnap.py` | Executes Barrnap, streams the GFF output, and extracts rRNA feature coordinates (18S, 5.8S, and 28S). |
+| `fastq.py`   | Streams FASTQ records from disk and writes trimmed FASTQ output while preserving quality scores.      |
+| `qc.py`      | Generates per-sample statistics, writes the summary table, and prints an overall run summary.         |
+
+This modular design separates orchestration, annotation, FASTQ processing, and reporting, making each component easier to test and maintain while allowing multiple samples to be processed efficiently.
+
+
+
+---
+
+# Pipeline Steps
+
+## 1. Input
+
+The pipeline accepts one or more FASTQ or compressed FASTQ (`.fastq.gz`) files containing long-read amplicons generated using platforms such as Oxford Nanopore Technologies or PacBio.
+
+Reads are streamed directly from disk and are never fully loaded into memory.
+
+---
+
+## 2. rRNA Annotation
+
+Each input file is processed with **Barrnap** using the current covariance model (Infernal)-based implementation.
+
+Barrnap identifies the positions of:
+
+* 18S rRNA
+* 5.8S rRNA
+* 28S rRNA
+
+within every read and returns these annotations as GFF records.
+
+The pipeline parses these annotations directly from Barrnap's output stream without creating intermediate files.
+
+---
+
+## 3. Selection of the 18S Region
+
+For each read:
+
+* reads without an annotated 18S region are discarded
+* if multiple 18S annotations are present, the longest annotation is retained
+* the corresponding nucleotide sequence is extracted from the original read
+* the identical coordinates are applied to the FASTQ quality string
+
+Because both sequence and quality scores are trimmed using the same coordinates, the output remains a valid FASTQ file suitable for downstream quality-aware analysis.
+
+---
+
+## 4. Output
+
+For every input FASTQ file the pipeline generates:
+
+```
+sample.18S.fastq.gz
+```
+
+containing only the extracted 18S sequences.
+
+No temporary FASTA or GFF files are retained.
+
+---
+
+## 5. Denoising
+
+The resulting FASTQ files can be analysed directly using Savont:
+
+```bash savont asv sample.18S.fastq.gz -o sample_savont
+```
+
+The inferred ASVs can subsequently be classified using databases such as SILVA or PR2.
+
+---
+
+# Quality Control
+
+The pipeline records quality-control statistics during every processing step.
+
+## Input Statistics
+
+For each sample:
+
+* total number of reads
+* total number of bases
+* mean read length
+* median read length
+
+These values provide an overview of the sequencing run before trimming.
+
+---
+
+## Barrnap Statistics
+
+The annotation step reports:
+
+* total number of 18S annotations
+* total number of 5.8S annotations
+* total number of 28S annotations
+* number of reads containing an 18S annotation
+* number of reads containing a 5.8S annotation
+* number of reads containing a 28S annotation
+* number of reads containing all three rRNA genes
+* number of reads containing multiple 18S annotations
+
+These statistics provide a rapid assessment of amplicon integrity and annotation success.
+
+---
+
+## Trimming Statistics
+
+Following trimming, the pipeline reports:
+
+* number of trimmed reads
+* number of retained bases
+* mean trimmed length
+* median trimmed length
+* minimum trimmed length
+* maximum trimmed length
+* N50 trimmed length
+* percentage of retained bases relative to the original dataset
+
+These metrics allow rapid identification of unexpectedly short or long annotations that may indicate sequencing artefacts or annotation errors.
+
+---
+
+# Summary Output
+
+A tab-separated summary file is generated:
+
+```
+trim18s.summary.tsv
+```
+
+Each row corresponds to one processed sample and includes all quality-control metrics generated by the pipeline.
+
+This file can be imported directly into R, Python, Excel, or other statistical software for comparison across sequencing runs.
+
+---
+
+# Design Principles
+
+The pipeline was developed with the following goals:
+
+* preserve original sequencing quality scores
+* avoid unnecessary intermediate files
+* stream data from disk to minimise memory usage
+* support processing of multiple FASTQ files
+* provide comprehensive quality-control metrics
+* produce FASTQ output directly compatible with Savont
+
+---
+
+# Current Scope
+
+The current implementation focuses exclusively on extraction of **18S rRNA** sequences from long-read eukaryotic ribosomal operon amplicons.
+
+Although Barrnap annotations for 5.8S and 28S are retained for quality-control purposes, only the 18S region is extracted.
+
+The implementation is intended as a preprocessing step prior to ASV inference using Savont.

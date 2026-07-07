@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+
+from collections import defaultdict
+
+
+def parse_gff(lines):
+    """
+    Parse Barrnap GFF output.
+
+    Returns
+
+    dict
+
+        read ->
+
+            {
+                "18S_rRNA":[(start,end)],
+                "5.8S_rRNA":[...],
+                "28S_rRNA":[...]
+            }
+    """
+
+    features = defaultdict(lambda: defaultdict(list))
+
+    for line in lines:
+
+        if line.startswith("#"):
+            continue
+
+        cols = line.rstrip().split("\t")
+
+        if len(cols) != 9:
+            continue
+
+        read = cols[0]
+
+        feature = cols[2]
+
+        start = int(cols[3]) - 1
+        end = int(cols[4])
+
+        features[read][feature].append((start, end))
+
+    return features
