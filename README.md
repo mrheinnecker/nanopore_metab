@@ -10,6 +10,10 @@ Scheme of the pipeline (Created with BioRender.com):
 
 ### **For detailed description of the pipeline visit [Wiki](https://github.com/ibe-uw/BaNaNA/wiki/Detailed-description-of-the-BaNaNA-pipeline) section of this repository!**
 
+Nextflow documentation is available in [NEXTFLOW.md](NEXTFLOW.md). A separate
+quality-preserving 18S-to-Savont ASV workflow is documented in
+[SAVONT_NEXTFLOW.md](SAVONT_NEXTFLOW.md).
+
 
 <!--- TOC START -->
 Table of Contents
@@ -182,7 +186,6 @@ Chwalińska M, Karlicki M, Romac S, Not F, Karnkowska A (2025) From short to lon
 ## Funding
 
 This work was supported by the National Science Centre, Poland (OPUS grant 2020/37/B/NZ8/01456)
-
 
 
 
