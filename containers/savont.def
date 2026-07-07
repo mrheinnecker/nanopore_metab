@@ -1,12 +1,9 @@
 Bootstrap: docker
 From: mambaorg/micromamba:1.5.8
 
-%files
-    ../savont /opt/savont
-
 %labels
     Author BaNaNA
-    Description Standalone Savont runtime with Barrnap, Python trim18s helpers, and locally built Savont
+    Description Standalone Savont runtime with Barrnap, Python trim18s helpers, and pinned Savont build
 
 %post
     micromamba install -y -n base -c conda-forge -c bioconda \
@@ -25,7 +22,9 @@ From: mambaorg/micromamba:1.5.8
     rustc --version
     cargo --version
 
+    git clone https://github.com/bluenote-1577/savont.git /opt/savont
     cd /opt/savont
+    git checkout e4e499228df50b8e9a4eb64345ef114424a81477
     cargo install --locked --path . --root /usr/local
     micromamba clean --all --yes
 

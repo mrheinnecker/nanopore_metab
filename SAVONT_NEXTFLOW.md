@@ -18,14 +18,8 @@ The workflow entry point is `savont.nf`; its defaults are in `savont.config`.
 
 ## Build The Container
 
-The container recipe expects the Savont repository to exist next to this repo:
-
-```text
-../savont
-```
-
-Build from this repository root so the `%files ../savont /opt/savont` line
-resolves correctly:
+The container recipe clones a pinned Savont commit during the build, so it does
+not require a local `../savont` checkout. Build from this repository root:
 
 ```bash
 apptainer build containers/savont.sif containers/savont.def
@@ -38,7 +32,7 @@ singularity build containers/savont.sif containers/savont.def
 ```
 
 The build installs Barrnap, VSEARCH, Python `xopen`, Rust/Cargo build tools,
-and then builds the local Savont checkout into `/usr/local/bin/savont`.
+and then builds the pinned Savont checkout into `/usr/local/bin/savont`.
 
 ## Input Barcode Directory
 
