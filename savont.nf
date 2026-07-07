@@ -9,6 +9,7 @@ nextflow.enable.dsl = 2
  */
 
 params.samplesheet = params.samplesheet ?: null
+params.barcode_dir = params.barcode_dir ?: null
 params.outdir = params.outdir ?: 'results/savont_run'
 params.threads = params.threads ?: 8
 params.trim_threads = params.trim_threads ?: params.threads
@@ -68,6 +69,14 @@ def samplesheetToChannel(samplesheet) {
             }
 
             tuple(sample, file(fastq, checkIfExists: true))
+        }
+}
+
+def barcodeDirToChannel(barcodeDir) {
+    Channel
+        .fromPath("${barcodeDir}/*", type: 'dir', checkIfExists: true)
+        .map { barcodePath ->
+            tuple(barcodePath.getName().toString(), barcodePath)
         }
 }
 
@@ -341,7 +350,15 @@ process SAVONT_EXPORT {
 }
 
 workflow {
-    requireParam('samplesheet', params.samplesheet)
+    def hasSamplesheet = params.samplesheet != null && params.samplesheet.toString().trim() != ''
+    def hasBarcodeDir = params.barcode_dir != null && params.barcode_dir.toString().trim() != ''
+
+    if (hasSamplesheet && hasBarcodeDir) {
+        error "Use either --samplesheet or --barcode_dir, not both"
+    }
+    if (!hasSamplesheet && !hasBarcodeDir) {
+        error "Missing input: provide --barcode_dir or --samplesheet"
+    }
 
     def classifier = params.classifier.toString()
     if (!(classifier in ['none', 'classify', 'sintax'])) {
@@ -351,7 +368,7 @@ workflow {
         requireParam('savont_db', params.savont_db)
     }
 
-    samples_ch = samplesheetToChannel(params.samplesheet)
+    samples_ch = hasBarcodeDir ? barcodeDirToChannel(params.barcode_dir) : samplesheetToChannel(params.samplesheet)
     trim18s_ch = Channel.value(file("${projectDir}/savont_niko", checkIfExists: true))
 
     PREPARE_READS(samples_ch)

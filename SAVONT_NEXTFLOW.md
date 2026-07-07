@@ -2,7 +2,7 @@
 
 This workflow runs the Savont path independently from the BaNaNA OTU workflow.
 Run the commands below from this repository root unless you pass absolute paths
-for `--samplesheet`, `--outdir`, and `--container`.
+for `--barcode_dir`, `--outdir`, and `--container`.
 
 ```text
 FASTQ
@@ -40,7 +40,25 @@ singularity build containers/savont.sif containers/savont.def
 The build installs Barrnap, VSEARCH, Python `xopen`, Rust/Cargo build tools,
 and then builds the local Savont checkout into `/usr/local/bin/savont`.
 
-## Samplesheet
+## Input Barcode Directory
+
+The default input style is a directory containing one immediate subfolder per
+barcode/sample:
+
+```text
+per_barcode/
+  barcode01/
+    *.fastq.gz
+  barcode05/
+    *.fastq.gz
+  barcode10/
+    *.fastq.gz
+```
+
+The workflow uses each subfolder name as the sample name. Each barcode folder
+may contain `.fastq`, `.fq`, `.fastq.gz`, or `.fq.gz` chunks.
+
+## Optional Samplesheet
 
 Use the same tab-separated samplesheet shape as the BaNaNA Nextflow workflow:
 
@@ -53,6 +71,8 @@ barcode02	/path/to/barcode02_fastq_directory
 The `fastq` column may point to a FASTQ/FASTQ.gz file or to a directory
 containing `.fastq`, `.fq`, `.fastq.gz`, or `.fq.gz` chunks.
 
+Use either `--barcode_dir` or `--samplesheet`, not both.
+
 ## Per-Sample ASVs
 
 This runs one independent Savont ASV job per sample:
@@ -60,7 +80,7 @@ This runs one independent Savont ASV job per sample:
 ```bash
 nextflow -C savont.config run savont.nf \
   -profile singularity \
-  --samplesheet samplesheet.tsv \
+  --barcode_dir /path/to/per_barcode \
   --outdir results/savont_run
 ```
 
@@ -79,7 +99,7 @@ sample separately:
 ```bash
 nextflow -C savont.config run savont.nf \
   -profile singularity \
-  --samplesheet samplesheet.tsv \
+  --barcode_dir /path/to/per_barcode \
   --outdir results/savont_pooled \
   --pooled_samples true
 ```
@@ -100,7 +120,7 @@ as BaNaNA, pass `--pr2_db`:
 ```bash
 nextflow -C savont.config run savont.nf \
   -profile singularity \
-  --samplesheet samplesheet.tsv \
+  --barcode_dir /path/to/per_barcode \
   --outdir results/savont_pr2 \
   --pr2_db /mnt/c/Users/rheinnec/Documents/taxseq/databases/pr2_version_5.1.1_SSU_taxo_long.fasta
 ```
@@ -151,7 +171,7 @@ Alignment-based classification:
 ```bash
 nextflow -C savont.config run savont.nf \
   -profile singularity \
-  --samplesheet samplesheet.tsv \
+  --barcode_dir /path/to/per_barcode \
   --outdir results/savont_classified \
   --savont_db /path/to/databases/silva-138.2 \
   --classifier classify
@@ -162,7 +182,7 @@ SINTAX classification:
 ```bash
 nextflow -C savont.config run savont.nf \
   -profile singularity \
-  --samplesheet samplesheet.tsv \
+  --barcode_dir /path/to/per_barcode \
   --outdir results/savont_sintax \
   --savont_db /path/to/databases/silva-138.2 \
   --classifier sintax
@@ -181,7 +201,7 @@ To generate Savont's merged QIIME2-compatible export files:
 ```bash
 nextflow -C savont.config run savont.nf \
   -profile singularity \
-  --samplesheet samplesheet.tsv \
+  --barcode_dir /path/to/per_barcode \
   --outdir results/savont_exported \
   --export_qiime true
 ```
@@ -221,7 +241,7 @@ The combined Slurm and Singularity profile is:
 nextflow -C savont.config run savont.nf \
   -profile hpc \
   -work-dir /path/to/scratch/savont_work \
-  --samplesheet /path/to/samplesheet.tsv \
+  --barcode_dir /path/to/per_barcode \
   --outdir /path/to/results/savont_run \
   --container /path/to/savont.sif \
   --pr2_db /path/to/pr2_version_5.1.1_SSU_taxo_long.fasta
