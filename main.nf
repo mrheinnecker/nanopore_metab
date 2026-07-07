@@ -244,7 +244,8 @@ process ERROR_CLUSTERING {
     tag "$sample"
     label 'python_tools'
     cpus { params.threads as int }
-    publishDir "${params.outdir}/intermediate/07_error_clustering", mode: 'copy', overwrite: true
+    
+    //publishDir "${params.outdir}/intermediate/07_error_clustering", mode: 'copy', overwrite: true
 
     input:
     tuple val(sample), path(rrna_fasta), path(threshold)
