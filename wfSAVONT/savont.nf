@@ -74,7 +74,7 @@ def samplesheetToChannel(samplesheet) {
 
 def inputDirToChannel(inputDir) {
     Channel
-        .fromPath("${inputDir}/*", checkIfExists: true)
+        .fromPath("${inputDir}/*", checkIfExists: true, type: 'any')
         .filter { inputPath ->
             inputPath.isDirectory() || inputPath.getName().toString() ==~ /.*\.(fastq|fq)(\.gz)?$/
         }
