@@ -39,9 +39,9 @@ nextflow run main.nf \
 
 
 
-
+cd /g/schwab/marco/repos/nanopore_metab/wfSAVONT
 nextflow run savont.nf \
-  -profile apptainer \
+  -profile slurm,apptainer \
   -work-dir /scratch/rheinnec/savont_work \
   --barcode_dir /g/schwab/marco/projects/nanopore_metab/raw_sequencing_results/nanopore_second_run_1000_reads \
   --outdir /g/schwab/marco/projects/nanopore_metab/output/savont \
