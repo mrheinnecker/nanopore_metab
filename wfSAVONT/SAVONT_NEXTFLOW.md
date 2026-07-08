@@ -229,12 +229,11 @@ after trimming.
 
 ## Slurm HPC Profile
 
-Use the Slurm scheduler profile together with the container-runtime profile
-available on the cluster:
+Use the combined Slurm and Apptainer profile on the cluster:
 
 ```bash
 nextflow run savont.nf \
-  -profile slurm,apptainer \
+  -profile slurm_apptainer \
   -work-dir /path/to/scratch/savont_work \
   --barcode_dir /path/to/per_barcode \
   --outdir /path/to/results/savont_run \
