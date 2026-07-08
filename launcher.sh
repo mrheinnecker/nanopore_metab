@@ -25,10 +25,44 @@ nextflow run savont.nf \
   --min_read_length 1000 \
   --max_read_length 4000
 
+
+
+cd /g/schwab/marco/repos/nanopore_metab/wfBANANA
+nextflow run main.nf \
+  -profile apptainer \
+  -resume \
+  -work-dir /scratch/rheinnec/nanopore_metab_work \
+  --barcode_dir /g/schwab/marco/projects/nanopore_metab/raw_sequencing_results/nanopore_second_run_1000_reads \
+  --db_location /g/schwab/marco/projects/nanopore_metab/databases/pr2_version_5.1.1_SSU_taxo_long.fasta \
+  --outdir /g/schwab/marco/projects/nanopore_metab/output/nanopore_second_run \
+  --container /g/schwab/marco/projects/nanopore_metab/containers/banana.sif
+
+
+
+
+nextflow run savont.nf \
+  -profile apptainer \
+  -work-dir /scratch/rheinnec/savont_work \
+  --barcode_dir /g/schwab/marco/projects/nanopore_metab/raw_sequencing_results/nanopore_second_run_1000_reads \
+  --outdir /g/schwab/marco/projects/nanopore_metab/output/savont \
+  --container /g/schwab/marco/container_devel/savont.sif \
+  --pr2_db /g/schwab/marco/projects/nanopore_metab/databases/pr2_version_5.1.1_SSU_taxo_long.fasta \
+  --min_read_length 1000 \
+  --max_read_length 4000 \
+  --min_cluster_size 12 \
+  --trim_threads 4 \
+  --savont_threads 4 \
+  --taxonomy_threads 4
+
+
+
+
+
+
 ## BaNaNA Slurm
 cd /g/schwab/marco/repos/nanopore_metab/wfBANANA
 nextflow run main.nf \
-  -profile slurm,apptainer \
+  -profile apptainer \
   -resume \
   -work-dir /scratch/rheinnec/nanopore_metab_work \
   --barcode_dir /g/schwab/marco/projects/nanopore_metab/raw_sequencing_results/nanopore_second_run/fastq_pass/per_barcode \
