@@ -29,7 +29,7 @@ nextflow run savont.nf \
 
 cd /g/schwab/marco/repos/nanopore_metab/wfBANANA
 nextflow run main.nf \
-  -profile apptainer \
+  -profile slurm,apptainer \
   -resume \
   -work-dir /scratch/rheinnec/nanopore_metab_work \
   --barcode_dir /g/schwab/marco/projects/nanopore_metab/raw_sequencing_results/nanopore_second_run_1000_reads \
@@ -62,7 +62,7 @@ nextflow run savont.nf \
 ## BaNaNA Slurm
 cd /g/schwab/marco/repos/nanopore_metab/wfBANANA
 nextflow run main.nf \
-  -profile apptainer \
+  -profile slurm,apptainer \
   -resume \
   -work-dir /scratch/rheinnec/nanopore_metab_work \
   --barcode_dir /g/schwab/marco/projects/nanopore_metab/raw_sequencing_results/nanopore_second_run/fastq_pass/per_barcode \
@@ -74,7 +74,6 @@ nextflow run main.nf \
 cd /g/schwab/marco/repos/nanopore_metab/wfSAVONT
 nextflow run savont.nf \
   -profile slurm,apptainer \
-  -resume \
   -work-dir /scratch/rheinnec/savont_work \
   --barcode_dir /g/schwab/marco/projects/nanopore_metab/raw_sequencing_results/nanopore_second_run/fastq_pass/per_barcode \
   --outdir /g/schwab/marco/projects/nanopore_metab/output/savont \
