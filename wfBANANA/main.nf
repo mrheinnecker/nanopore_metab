@@ -112,7 +112,7 @@ process PREPARE_READS {
     script:
     """
     if [ -d "${reads}" ]; then
-        find -L "${reads}" -maxdepth 1 -type f \\( -name '*.fastq' -o -name '*.fq' -o -name '*.fastq.gz' -o -name '*.fq.gz' \\) | sort > ${sample}.fastq.list
+        find -L "${reads}" -type f \\( -name '*.fastq' -o -name '*.fq' -o -name '*.fastq.gz' -o -name '*.fq.gz' \\) | sort > ${sample}.fastq.list
         if [ ! -s ${sample}.fastq.list ]; then
             echo "No FASTQ files found for ${sample} in ${reads}" >&2
             exit 1

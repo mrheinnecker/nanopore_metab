@@ -117,7 +117,9 @@ sbatch launcher.sh full-slurm
 The launcher passes `BANANA_BARCODE_DIR` to the workflow as `--barcode_dir`.
 The workflow uses every immediate barcode/sample subdirectory or FASTQ file in
 that directory as one sample. For example,
-`/path/to/per_barcode/barcode01` is used as sample `barcode01`.
+`/path/to/per_barcode/barcode01` is used as sample `barcode01`. If a sample is a
+directory, FASTQ chunks are discovered recursively below that directory,
+decompressed if needed, and concatenated before filtering.
 
 If you want to manually include/exclude or rename barcode inputs, skip the
 launcher's `full`/`full-slurm` mode and provide an explicit samplesheet instead:
