@@ -19,6 +19,9 @@ Building the container might take a few minutes. As soon as it is done, you are 
 
 
 ```bash
+## load nextflow from EMBL modules
+
+module load Nextflow/24.10.4
 
 ## Banana Slurm
 
