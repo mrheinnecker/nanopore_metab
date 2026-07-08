@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-cat <<'COMMANDS'
 
-Copy/paste the command you need. Running this file only prints these commands.
 
 ## BaNaNA local test
 cd /mnt/c/repos/nanopore_metab/wfBANANA
@@ -54,4 +52,3 @@ nextflow run savont.nf \
   --trim_threads 4 \
   --savont_threads 4 \
   --taxonomy_threads 4
-COMMANDS
