@@ -72,11 +72,17 @@ def samplesheetToChannel(samplesheet) {
         }
 }
 
-def barcodeDirToChannel(barcodeDir) {
+def inputDirToChannel(inputDir) {
     Channel
-        .fromPath("${barcodeDir}/*", type: 'dir', checkIfExists: true)
-        .map { barcodePath ->
-            tuple(barcodePath.getName().toString(), barcodePath)
+        .fromPath("${inputDir}/*", checkIfExists: true)
+        .filter { inputPath ->
+            inputPath.isDirectory() || inputPath.getName().toString() ==~ /.*\.(fastq|fq)(\.gz)?$/
+        }
+        .map { inputPath ->
+            def sample = inputPath.isDirectory()
+                ? inputPath.getName().toString()
+                : inputPath.getName().toString().replaceFirst(/\.(fastq|fq)(\.gz)?$/, '')
+            tuple(sample, inputPath)
         }
 }
 
@@ -359,6 +365,9 @@ workflow {
     if (!hasSamplesheet && !hasBarcodeDir) {
         error "Missing input: provide --barcode_dir or --samplesheet"
     }
+    if (hasBarcodeDir && !file(params.barcode_dir).isDirectory()) {
+        error "--barcode_dir must be a directory: ${params.barcode_dir}"
+    }
 
     def classifier = params.classifier.toString()
     if (!(classifier in ['none', 'classify', 'sintax'])) {
@@ -368,7 +377,7 @@ workflow {
         requireParam('savont_db', params.savont_db)
     }
 
-    samples_ch = hasBarcodeDir ? barcodeDirToChannel(params.barcode_dir) : samplesheetToChannel(params.samplesheet)
+    samples_ch = hasBarcodeDir ? inputDirToChannel(params.barcode_dir) : (file(params.samplesheet).isDirectory() ? inputDirToChannel(params.samplesheet) : samplesheetToChannel(params.samplesheet))
     trim18s_ch = Channel.value(file("${projectDir}/savont_niko", checkIfExists: true))
 
     PREPARE_READS(samples_ch)

@@ -8,6 +8,7 @@ nextflow.enable.dsl = 2
  */
 
 params.samplesheet = params.samplesheet ?: null
+params.barcode_dir = params.barcode_dir ?: null
 params.outdir = params.outdir ?: 'results'
 params.threads = params.threads ?: 8
 
@@ -55,6 +56,25 @@ def samplesheetToChannel(samplesheet) {
             }
 
             tuple(sample, file(fastq, checkIfExists: true))
+        }
+}
+
+def inputDirToChannel(inputDir) {
+    Channel
+        .fromPath("${inputDir}/*", checkIfExists: true)
+        .filter { inputPath ->
+            inputPath.isDirectory() || inputPath.getName().toString() ==~ /.*\.(fastq|fq)(\.gz)?$/
+        }
+        .map { inputPath ->
+            def sample = inputPath.isDirectory()
+                ? inputPath.getName().toString()
+                : inputPath.getName().toString().replaceFirst(/\.(fastq|fq)(\.gz)?$/, '')
+
+            if (sample.contains('_')) {
+                error "Sample '${sample}' contains '_'. BaNaNA abundance parsing assumes sample names do not contain underscores."
+            }
+
+            tuple(sample, inputPath)
         }
 }
 
@@ -620,11 +640,23 @@ process BIOLOGICAL_REPORT {
 }
 
 workflow {
-    requireParam('samplesheet', params.samplesheet)
+    def hasSamplesheet = params.samplesheet != null && params.samplesheet.toString().trim() != ''
+    def hasBarcodeDir = params.barcode_dir != null && params.barcode_dir.toString().trim() != ''
+
+    if (hasSamplesheet && hasBarcodeDir) {
+        error "Use either --samplesheet or --barcode_dir, not both"
+    }
+    if (!hasSamplesheet && !hasBarcodeDir) {
+        error "Missing input: provide --barcode_dir or --samplesheet"
+    }
+    if (hasBarcodeDir && !file(params.barcode_dir).isDirectory()) {
+        error "--barcode_dir must be a directory: ${params.barcode_dir}"
+    }
+
     requireParam('db_location', params.db_location)
     def enable_taxonomy_table = truthy(params.enable_optional_taxonomy_format)
 
-    samples_ch = samplesheetToChannel(params.samplesheet)
+    samples_ch = hasBarcodeDir ? inputDirToChannel(params.barcode_dir) : (file(params.samplesheet).isDirectory() ? inputDirToChannel(params.samplesheet) : samplesheetToChannel(params.samplesheet))
     scripts_ch = Channel.value(file("${projectDir}/scripts", checkIfExists: true))
     error_table_ch = Channel.value(file("${projectDir}/files/P_error_table.tsv", checkIfExists: true))
     database_ch = Channel.value(file(params.db_location, checkIfExists: true))

@@ -114,28 +114,26 @@ export BANANA_CONTAINER=/path/to/banana.sif
 sbatch launcher.sh full-slurm
 ```
 
-The launcher automatically creates:
+The launcher passes `BANANA_BARCODE_DIR` to the workflow as `--barcode_dir`.
+The workflow uses every immediate barcode/sample subdirectory or FASTQ file in
+that directory as one sample. For example,
+`/path/to/per_barcode/barcode01` is used as sample `barcode01`.
 
-```text
-<BANANA_OUTDIR>/samplesheet.tsv
-```
-
-from every `barcode*` subdirectory directly under `BANANA_BARCODE_DIR`. For
-example, `/path/to/per_barcode/barcode01` becomes:
-
-```text
-sample	fastq
-barcode01	/path/to/per_barcode/barcode01
-```
-
-If you want to manually include/exclude or rename barcode inputs, provide an
-explicit samplesheet instead:
+If you want to manually include/exclude or rename barcode inputs, skip the
+launcher's `full`/`full-slurm` mode and provide an explicit samplesheet instead:
 
 ```bash
-export BANANA_SAMPLESHEET=/path/to/samplesheet.tsv
+nextflow run /path/to/nanopore_metab/wfBANANA/main.nf \
+  -profile slurm,apptainer \
+  -work-dir /path/to/work/banana_run \
+  --samplesheet /path/to/samplesheet.tsv \
+  --db_location /path/to/pr2_or_other_reference.fasta \
+  --outdir /path/to/results/banana_run \
+  --container /path/to/banana.sif
 ```
 
-`BANANA_SAMPLESHEET` takes priority over `BANANA_BARCODE_DIR`.
+Use `--samplesheet` instead of `--barcode_dir`; the workflow errors if both are
+provided.
 
 By default, the launcher starts Nextflow from `BANANA_OUTDIR`. This keeps
 Nextflow metadata such as `.nextflow/history.lock` in a writable run directory

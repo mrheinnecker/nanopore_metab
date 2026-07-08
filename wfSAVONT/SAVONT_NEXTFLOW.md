@@ -1,8 +1,8 @@
 # Standalone Savont Nextflow Workflow
 
 This workflow runs the Savont path independently from the BaNaNA OTU workflow.
-Run the commands below from this repository root unless you pass absolute paths
-for `--barcode_dir`, `--outdir`, and `--container`.
+Run the commands below from the `wfSAVONT` workflow directory unless you pass
+absolute paths for `--barcode_dir`, `--outdir`, and `--container`.
 
 ```text
 FASTQ
@@ -14,12 +14,12 @@ FASTQ
   -> optional savont export
 ```
 
-The workflow entry point is `savont.nf`; its defaults are in `savont.config`.
+The workflow entry point is `savont.nf`; its defaults are in `nextflow.config`.
 
 ## Build The Container
 
 The container recipe clones a pinned Savont commit during the build, so it does
-not require a local `../savont` checkout. Build from this repository root:
+not require a local `../savont` checkout. Build from the `wfSAVONT` directory:
 
 ```bash
 apptainer build containers/savont.sif containers/savont.def
@@ -72,7 +72,7 @@ Use either `--barcode_dir` or `--samplesheet`, not both.
 This runs one independent Savont ASV job per sample:
 
 ```bash
-nextflow -C savont.config run savont.nf \
+nextflow run savont.nf \
   -profile singularity \
   --barcode_dir /path/to/per_barcode \
   --outdir results/savont_run
@@ -91,7 +91,7 @@ This pools samples for ASV discovery and asks Savont to quantify each input
 sample separately:
 
 ```bash
-nextflow -C savont.config run savont.nf \
+nextflow run savont.nf \
   -profile singularity \
   --barcode_dir /path/to/per_barcode \
   --outdir results/savont_pooled \
@@ -112,7 +112,7 @@ To annotate Savont ASVs with a PR2 FASTA database using the same VSEARCH style
 as BaNaNA, pass `--pr2_db`:
 
 ```bash
-nextflow -C savont.config run savont.nf \
+nextflow run savont.nf \
   -profile singularity \
   --barcode_dir /path/to/per_barcode \
   --outdir results/savont_pr2 \
@@ -163,7 +163,7 @@ created by `savont download`.
 Alignment-based classification:
 
 ```bash
-nextflow -C savont.config run savont.nf \
+nextflow run savont.nf \
   -profile singularity \
   --barcode_dir /path/to/per_barcode \
   --outdir results/savont_classified \
@@ -174,7 +174,7 @@ nextflow -C savont.config run savont.nf \
 SINTAX classification:
 
 ```bash
-nextflow -C savont.config run savont.nf \
+nextflow run savont.nf \
   -profile singularity \
   --barcode_dir /path/to/per_barcode \
   --outdir results/savont_sintax \
@@ -193,7 +193,7 @@ Classification outputs are published to:
 To generate Savont's merged QIIME2-compatible export files:
 
 ```bash
-nextflow -C savont.config run savont.nf \
+nextflow run savont.nf \
   -profile singularity \
   --barcode_dir /path/to/per_barcode \
   --outdir results/savont_exported \
@@ -229,11 +229,12 @@ after trimming.
 
 ## Slurm HPC Profile
 
-The combined Slurm and Singularity profile is:
+Use the Slurm scheduler profile together with the container-runtime profile
+available on the cluster:
 
 ```bash
-nextflow -C savont.config run savont.nf \
-  -profile hpc \
+nextflow run savont.nf \
+  -profile slurm,apptainer \
   -work-dir /path/to/scratch/savont_work \
   --barcode_dir /path/to/per_barcode \
   --outdir /path/to/results/savont_run \
