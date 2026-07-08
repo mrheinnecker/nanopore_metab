@@ -5,9 +5,9 @@ This repository now contains two workflow directories:
 - `wfBANANA/`: the BaNaNA OTU workflow, including Snakemake and Nextflow entry points (https://github.com/ibe-uw/BaNaNA)
 - `wfSAVONT/`: the standalone Savont ASV workflow with 18S trimming and optional PR2 annotation (https://github.com/bluenote-1577/savont)
 
-Both workflows start from fastq files. There are two valid option how the input can be organised: 
-* Path to a directory that has each barcode as asubdirectory containing the fastq file
-* Path to a tsv file (samplesheet.tsv) that has two columns: sample; fastq; First one giving the name and seconf one giving the absolute path to the fastq
+Both workflows start from fastq files. There are two valid options how the input can be organised: 
+* Path to a directory that has each barcode as a subdirectory containing the fastq file
+* Path to a tsv file (samplesheet.tsv) that has two columns: sample; fastq; First one giving the name and second one giving the absolute path to the fastq
 
 If you want to run them in the EMBL HPC environment. First build the container. Singulariyt/Apptainer is preinstalled for every user. So just go via:
 ```bash
