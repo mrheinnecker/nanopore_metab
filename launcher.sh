@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 
+module load Nextflow/24.10.4
+
 ## BaNaNA local test
 cd /mnt/c/repos/nanopore_metab/wfBANANA
 nextflow run main.nf \
@@ -63,11 +65,10 @@ nextflow run savont.nf \
 cd /g/schwab/marco/repos/nanopore_metab/wfBANANA
 nextflow run main.nf \
   -profile slurm,apptainer \
-  -resume \
   -work-dir /scratch/rheinnec/nanopore_metab_work \
   --barcode_dir /g/schwab/marco/projects/nanopore_metab/raw_sequencing_results/nanopore_second_run/fastq_pass/per_barcode \
   --db_location /g/schwab/marco/projects/nanopore_metab/databases/pr2_version_5.1.1_SSU_taxo_long.fasta \
-  --outdir /g/schwab/marco/projects/nanopore_metab/output/nanopore_second_run \
+  --outdir /g/schwab/marco/projects/nanopore_metab/output/nanopore_second_run02 \
   --container /g/schwab/marco/projects/nanopore_metab/containers/banana.sif
 
 ## Savont Slurm
@@ -85,3 +86,34 @@ nextflow run savont.nf \
   --trim_threads 4 \
   --savont_threads 4 \
   --taxonomy_threads 4
+
+
+
+### BLAST implementation
+
+
+
+  singularity build \
+    /g/schwab/marco/container_devel/blast_remote.sif \
+    containers/blast_remote.def
+
+  cd /mnt/c/repos/nanopore_metab/wfSAVONT/blast_remote
+
+  nextflow run main.nf \
+    -profile apptainer \
+    -work-dir /tmp/nanopore_metab_blast_work \
+    --query /path/to/savont_barcode01/final_asvs.fasta \
+    --outdir /path/to/results/blast
+
+  #For multiple barcodes, point --asv_dir at the SAVONT ASV results directory:
+
+  nextflow run main.nf \
+    -profile apptainer \
+    -work-dir /tmp/nanopore_metab_blast_work \
+    --asv_dir /mnt/c/Users/rheinnec/Documents/taxseq/out02/asv \
+    --outdir /mnt/c/projects/nanopore_metab/blast
+
+
+
+
+##
