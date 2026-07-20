@@ -107,11 +107,15 @@ nextflow run savont.nf \
 
   #For multiple barcodes, point --asv_dir at the SAVONT ASV results directory:
 
+
+module load Nextflow/26.04.4
+
   nextflow run main.nf \
     -profile apptainer \
-    -work-dir /tmp/nanopore_metab_blast_work \
-    --asv_dir /mnt/c/Users/rheinnec/Documents/taxseq/out02/asv \
-    --outdir /mnt/c/projects/nanopore_metab/blast
+    -work-dir /scratch/rheinnec/nanopore_metab_blast_work \
+    --asv_dir /g/schwab/marco/projects/nanopore_metab/output/savont/asv \
+    --outdir /g/schwab/marco/projects/nanopore_metab/output/blast \
+    --container /g/schwab/marco/container_devel/blast_remote.sif
 
 
 
