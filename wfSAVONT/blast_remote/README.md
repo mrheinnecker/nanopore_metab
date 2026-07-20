@@ -106,10 +106,15 @@ interactive charts requires internet access.
 - `--task`: BLASTN task; default `blastn`.
 - `--evalue`: E-value cutoff; default `1e-20`.
 - `--max_target_seqs`: maximum target sequences retained per query; default `20`.
+- `--per_query_retries`: attempts allowed for each individual ASV; default `5`.
+- `--retry_delay_seconds`: base delay between attempts, multiplied by the
+  attempt number; default `20`.
 - `--container`: override the default `.sif` path.
 
 Remote BLAST requires outbound internet access. NCBI describes its BLAST
 servers as a shared resource and asks users to run only one remote BLAST
 application at a time. The workflow therefore fixes `maxForks = 1` and does
-not request query parallelism. `--query` and `--asv_dir` are mutually
-exclusive; one of them is required.
+not request query parallelism. Each ASV is submitted separately and its
+response is accepted only when NCBI reports a nonzero effective search space;
+transport errors and incomplete responses are retried. `--query` and
+`--asv_dir` are mutually exclusive; one of them is required.
