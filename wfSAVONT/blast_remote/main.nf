@@ -11,12 +11,15 @@ nextflow.enable.dsl = 2
 params.query = params.query ?: null
 params.asv_dir = params.asv_dir ?: null
 params.outdir = params.outdir ?: 'results/remote_blast'
-params.db = params.db ?: 'nt'
-params.task = params.task ?: 'blastn'
+params.db = params.db ?: 'core_nt'
+params.task = params.task ?: 'megablast'
 params.evalue = params.evalue ?: '1e-20'
 params.max_target_seqs = params.max_target_seqs ?: 20
 params.per_query_retries = params.per_query_retries ?: 5
 params.retry_delay_seconds = params.retry_delay_seconds ?: 20
+params.dry_run_queries = params.dry_run_queries ?: 0
+params.poll_interval_seconds = params.poll_interval_seconds ?: 20
+params.max_wait_seconds = params.max_wait_seconds ?: 3600
 params.container = params.container ?: "${projectDir}/containers/blast_remote.sif"
 
 process NCBI_REMOTE_BLAST {
@@ -28,9 +31,11 @@ process NCBI_REMOTE_BLAST {
     input:
     tuple val(sample), path(query)
     path plot_script
+    path api_script
 
     output:
-    tuple val(sample), path("${sample}.blast_archive.asn1"), emit: archive
+    tuple val(sample), path("${sample}.blast_results.json"), emit: json
+    tuple val(sample), path("${sample}.blast_requests.tsv"), emit: requests
     tuple val(sample), path("${sample}.blast_hits.tsv"), emit: hits
     tuple val(sample), path("${sample}.blast_report.txt"), emit: report
     tuple val(sample), path("${sample}.blast_dashboard.html"), emit: dashboard
@@ -44,7 +49,9 @@ process NCBI_REMOTE_BLAST {
 
     printf 'query_id\\tquery_length\\tsubject_accession\\ttaxonomy_ids\\tscientific_name\\tcommon_name\\tpercent_identity\\talignment_length\\tmismatches\\tgaps\\tquery_start\\tquery_end\\tsubject_start\\tsubject_end\\tquery_coverage\\tevalue\\tbit_score\\tsubject_title\\n' \
         > ${sample}.blast_hits.tsv
-    : > ${sample}.blast_archive.asn1
+    printf 'query_file\\trid\\n' > ${sample}.blast_requests.tsv
+    printf '{"BlastOutput2":[' > ${sample}.blast_results.json
+    json_count=0
     : > ${sample}.blast_report.txt
 
     mkdir split_queries
@@ -57,31 +64,32 @@ process NCBI_REMOTE_BLAST {
         { print > output }
     ' ${query}
 
+    processed_queries=0
     for query_file in split_queries/query_*.fasta; do
+        if (( ${params.dry_run_queries} > 0 && processed_queries >= ${params.dry_run_queries} )); then
+            break
+        fi
+        processed_queries=\$((processed_queries + 1))
+
         query_name=\$(basename "\${query_file}" .fasta)
-        query_archive="\${query_name}.asn1"
+        query_json="\${query_name}.json"
         query_report="\${query_name}.txt"
         query_ok=false
 
         for attempt in \$(seq 1 ${params.per_query_retries}); do
-            rm -f "\${query_archive}" "\${query_report}"
+            rm -f "\${query_json}" "\${query_report}"
             echo "Submitting \${query_name} to NCBI (attempt \${attempt}/${params.per_query_retries})" >&2
 
-            if blastn \
-                -query "\${query_file}" \
-                -db ${params.db} \
-                -remote \
-                -task ${params.task} \
-                -evalue ${params.evalue} \
-                -max_target_seqs ${params.max_target_seqs} \
-                -outfmt 11 \
-                -out "\${query_archive}" \
-                && blast_formatter \
-                    -archive "\${query_archive}" \
-                    -outfmt 0 \
-                    -out "\${query_report}" \
-                && ! grep -aEiq 'request-id "Error"|CRPCClientException|Connection stream is in bad state' "\${query_archive}" \
-                && grep -Eq 'Effective search space used: [1-9][0-9]*' "\${query_report}"; then
+            if rid=\$(bash ${api_script} \
+                "\${query_file}" \
+                "${params.db}" \
+                "${params.task}" \
+                "${params.evalue}" \
+                "${params.max_target_seqs}" \
+                "${params.poll_interval_seconds}" \
+                "${params.max_wait_seconds}" \
+                "\${query_json}" \
+                "\${query_report}"); then
                 query_ok=true
                 break
             fi
@@ -97,14 +105,41 @@ process NCBI_REMOTE_BLAST {
             exit 75
         fi
 
-        cat "\${query_archive}" >> ${sample}.blast_archive.asn1
-        blast_formatter \
-            -archive "\${query_archive}" \
-            -outfmt "6 qseqid qlen saccver staxids sscinames scomnames pident length mismatch gaps qstart qend sstart send qcovs evalue bitscore stitle" \
-            >> ${sample}.blast_hits.tsv
+        printf '%s\\t%s\\n' "\${query_name}" "\${rid}" >> ${sample}.blast_requests.tsv
+        if (( json_count > 0 )); then printf ',' >> ${sample}.blast_results.json; fi
+        jq -c '.BlastOutput2[]' "\${query_json}" >> ${sample}.blast_results.json
+        json_count=\$((json_count + 1))
+
+        jq -r '
+            .BlastOutput2[].report.results.search as \$search
+            | \$search.hits[]?
+            | .description[0] as \$description
+            | .hsps[0] as \$hsp
+            | [
+                (\$search.query_title | split(" ")[0]),
+                \$search.query_len,
+                \$description.accession,
+                (\$description.taxid // ""),
+                (\$description.sciname // ""),
+                "",
+                (100 * \$hsp.identity / \$hsp.align_len),
+                \$hsp.align_len,
+                (\$hsp.align_len - \$hsp.identity - \$hsp.gaps),
+                \$hsp.gaps,
+                \$hsp.query_from,
+                \$hsp.query_to,
+                \$hsp.hit_from,
+                \$hsp.hit_to,
+                (100 * ((\$hsp.query_to - \$hsp.query_from) | fabs + 1) / \$search.query_len),
+                \$hsp.evalue,
+                \$hsp.bit_score,
+                \$description.title
+              ] | @tsv
+        ' "\${query_json}" >> ${sample}.blast_hits.tsv
         cat "\${query_report}" >> ${sample}.blast_report.txt
         printf '\\n\\n' >> ${sample}.blast_report.txt
     done
+    printf ']}' >> ${sample}.blast_results.json
 
     awk -f ${plot_script} \
         -v sample="${sample}" \
@@ -114,7 +149,8 @@ process NCBI_REMOTE_BLAST {
 
     stub:
     """
-    touch ${sample}.blast_archive.asn1
+    printf '{"BlastOutput2":[]}' > ${sample}.blast_results.json
+    printf 'query_file\\trid\\n' > ${sample}.blast_requests.tsv
     printf 'query_id\\tquery_length\\tsubject_accession\\ttaxonomy_ids\\tscientific_name\\tcommon_name\\tpercent_identity\\talignment_length\\tmismatches\\tgaps\\tquery_start\\tquery_end\\tsubject_start\\tsubject_end\\tquery_coverage\\tevalue\\tbit_score\\tsubject_title\\n' > ${sample}.blast_hits.tsv
     printf 'BLASTN stub output\\n' > ${sample}.blast_report.txt
     printf '<!doctype html><title>Stub BLAST dashboard</title>\\n' > ${sample}.blast_dashboard.html
@@ -131,8 +167,8 @@ workflow {
     if (!hasQuery && !hasAsvDir) {
         error "Missing input: provide --query FASTA or --asv_dir SAVONT_RESULTS_DIR"
     }
-    if (!(params.task.toString() in ['blastn', 'blastn-short', 'dc-megablast', 'megablast', 'rmblastn'])) {
-        error "--task must be a task supported by blastn"
+    if (!(params.task.toString() in ['blastn', 'blastn-short', 'megablast'])) {
+        error "--task must be blastn, blastn-short, or megablast for the NCBI URL API"
     }
     if ((params.max_target_seqs as int) < 1) {
         error "--max_target_seqs must be at least 1"
@@ -142,6 +178,15 @@ workflow {
     }
     if ((params.retry_delay_seconds as int) < 0) {
         error "--retry_delay_seconds cannot be negative"
+    }
+    if ((params.dry_run_queries as int) < 0) {
+        error "--dry_run_queries cannot be negative"
+    }
+    if ((params.poll_interval_seconds as int) < 10) {
+        error "--poll_interval_seconds must be at least 10"
+    }
+    if ((params.max_wait_seconds as int) < 1) {
+        error "--max_wait_seconds must be at least 1"
     }
 
     if (hasQuery) {
@@ -160,5 +205,6 @@ workflow {
             }
     }
     plot_script_ch = Channel.value(file("${projectDir}/scripts/blast_interactive_report.awk", checkIfExists: true))
-    NCBI_REMOTE_BLAST(query_ch, plot_script_ch)
+    api_script_ch = Channel.value(file("${projectDir}/scripts/ncbi_blast_url.sh", checkIfExists: true))
+    NCBI_REMOTE_BLAST(query_ch, plot_script_ch, api_script_ch)
 }

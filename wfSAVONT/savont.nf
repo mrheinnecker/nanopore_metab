@@ -26,6 +26,15 @@ params.db_id = params.db_id ?: 0.7
 params.db_query_cov = params.db_query_cov ?: 0.9
 params.enable_taxonomy_table = params.enable_taxonomy_table != null ? params.enable_taxonomy_table : true
 params.enable_biological_report = params.enable_biological_report != null ? params.enable_biological_report : true
+params.blast_queries = params.blast_queries ?: 0
+params.blast_db = params.blast_db ?: 'core_nt'
+params.blast_task = params.blast_task ?: 'megablast'
+params.blast_evalue = params.blast_evalue ?: '1e-20'
+params.blast_max_target_seqs = params.blast_max_target_seqs ?: 20
+params.blast_per_query_retries = params.blast_per_query_retries ?: 5
+params.blast_retry_delay_seconds = params.blast_retry_delay_seconds ?: 20
+params.blast_poll_interval_seconds = params.blast_poll_interval_seconds ?: 20
+params.blast_max_wait_seconds = params.blast_max_wait_seconds ?: 3600
 
 params.min_read_length = params.min_read_length ?: 1100
 params.max_read_length = params.max_read_length ?: 2000
@@ -355,6 +364,136 @@ process SAVONT_EXPORT {
     """
 }
 
+process NCBI_REMOTE_BLAST {
+    tag "$sample"
+    label 'savont_blast'
+    publishDir "${params.outdir}/blast", mode: 'copy', overwrite: true
+
+    input:
+    tuple val(sample), path(query)
+    path plot_script
+    path api_script
+
+    output:
+    tuple val(sample), path("${sample}.blast_results.json"), emit: json
+    tuple val(sample), path("${sample}.blast_requests.tsv"), emit: requests
+    tuple val(sample), path("${sample}.blast_hits.tsv"), emit: hits
+    tuple val(sample), path("${sample}.blast_report.txt"), emit: report
+    tuple val(sample), path("${sample}.blast_dashboard.html"), emit: dashboard
+
+    script:
+    """
+    if ! grep -q '^>' ${query}; then
+        echo "Input does not contain any FASTA records: ${query}" >&2
+        exit 1
+    fi
+
+    printf 'query_id\\tquery_length\\tsubject_accession\\ttaxonomy_ids\\tscientific_name\\tcommon_name\\tpercent_identity\\talignment_length\\tmismatches\\tgaps\\tquery_start\\tquery_end\\tsubject_start\\tsubject_end\\tquery_coverage\\tevalue\\tbit_score\\tsubject_title\\n' > ${sample}.blast_hits.tsv
+    printf 'query_file\\trid\\n' > ${sample}.blast_requests.tsv
+    printf '{"BlastOutput2":[' > ${sample}.blast_results.json
+    json_count=0
+    : > ${sample}.blast_report.txt
+
+    mkdir split_queries
+    awk '
+        /^>/ {
+            if (output) close(output)
+            count++
+            output = sprintf("split_queries/query_%06d.fasta", count)
+        }
+        { print > output }
+    ' ${query}
+
+    processed_queries=0
+    for query_file in split_queries/query_*.fasta; do
+        if (( processed_queries >= ${params.blast_queries} )); then
+            break
+        fi
+        processed_queries=\$((processed_queries + 1))
+
+        query_name=\$(basename "\${query_file}" .fasta)
+        query_json="\${query_name}.json"
+        query_report="\${query_name}.txt"
+        query_ok=false
+
+        for attempt in \$(seq 1 ${params.blast_per_query_retries}); do
+            rm -f "\${query_json}" "\${query_report}"
+            echo "Submitting \${query_name} to NCBI (attempt \${attempt}/${params.blast_per_query_retries})" >&2
+
+            if rid=\$(bash ${api_script} \
+                "\${query_file}" \
+                "${params.blast_db}" \
+                "${params.blast_task}" \
+                "${params.blast_evalue}" \
+                "${params.blast_max_target_seqs}" \
+                "${params.blast_poll_interval_seconds}" \
+                "${params.blast_max_wait_seconds}" \
+                "\${query_json}" \
+                "\${query_report}"); then
+                query_ok=true
+                break
+            fi
+
+            echo "NCBI returned an incomplete/error response for \${query_name}" >&2
+            if (( attempt < ${params.blast_per_query_retries} )); then
+                sleep \$(( ${params.blast_retry_delay_seconds} * attempt ))
+            fi
+        done
+
+        if [[ "\${query_ok}" != true ]]; then
+            echo "No valid NCBI response for \${query_name} after ${params.blast_per_query_retries} attempts" >&2
+            exit 75
+        fi
+
+        printf '%s\\t%s\\n' "\${query_name}" "\${rid}" >> ${sample}.blast_requests.tsv
+        if (( json_count > 0 )); then printf ',' >> ${sample}.blast_results.json; fi
+        jq -c '.BlastOutput2[]' "\${query_json}" >> ${sample}.blast_results.json
+        json_count=\$((json_count + 1))
+
+        jq -r '
+            .BlastOutput2[].report.results.search as \$search
+            | \$search.hits[]?
+            | .description[0] as \$description
+            | .hsps[0] as \$hsp
+            | [
+                (\$search.query_title | split(" ")[0]),
+                \$search.query_len,
+                \$description.accession,
+                (\$description.taxid // ""),
+                (\$description.sciname // ""),
+                "",
+                (100 * \$hsp.identity / \$hsp.align_len),
+                \$hsp.align_len,
+                (\$hsp.align_len - \$hsp.identity - \$hsp.gaps),
+                \$hsp.gaps,
+                \$hsp.query_from,
+                \$hsp.query_to,
+                \$hsp.hit_from,
+                \$hsp.hit_to,
+                (100 * ((\$hsp.query_to - \$hsp.query_from) | fabs + 1) / \$search.query_len),
+                \$hsp.evalue,
+                \$hsp.bit_score,
+                \$description.title
+              ] | @tsv
+        ' "\${query_json}" >> ${sample}.blast_hits.tsv
+        cat "\${query_report}" >> ${sample}.blast_report.txt
+        printf '\\n\\n' >> ${sample}.blast_report.txt
+    done
+    printf ']}' >> ${sample}.blast_results.json
+
+    awk -f ${plot_script} -v sample="${sample}" ${sample}.blast_hits.tsv > ${sample}.blast_dashboard.html
+    """
+
+    stub:
+    """
+    printf '{"BlastOutput2":[]}' > ${sample}.blast_results.json
+    printf 'query_file\\trid\\n' > ${sample}.blast_requests.tsv
+    printf 'query_id\\tquery_length\\tsubject_accession\\ttaxonomy_ids\\tscientific_name\\tcommon_name\\tpercent_identity\\talignment_length\\tmismatches\\tgaps\\tquery_start\\tquery_end\\tsubject_start\\tsubject_end\\tquery_coverage\\tevalue\\tbit_score\\tsubject_title\\n' > ${sample}.blast_hits.tsv
+    printf 'BLASTN stub output\\n' > ${sample}.blast_report.txt
+    printf '<!doctype html><title>Stub BLAST dashboard</title>\\n' > ${sample}.blast_dashboard.html
+    """
+}
+
 workflow {
     def hasSamplesheet = params.samplesheet != null && params.samplesheet.toString().trim() != ''
     def hasBarcodeDir = params.barcode_dir != null && params.barcode_dir.toString().trim() != ''
@@ -375,6 +514,27 @@ workflow {
     }
     if (classifier != 'none') {
         requireParam('savont_db', params.savont_db)
+    }
+    if ((params.blast_queries as int) < 0) {
+        error "--blast_queries cannot be negative"
+    }
+    if (!(params.blast_task.toString() in ['blastn', 'blastn-short', 'megablast'])) {
+        error "--blast_task must be blastn, blastn-short, or megablast"
+    }
+    if ((params.blast_max_target_seqs as int) < 1) {
+        error "--blast_max_target_seqs must be at least 1"
+    }
+    if ((params.blast_per_query_retries as int) < 1) {
+        error "--blast_per_query_retries must be at least 1"
+    }
+    if ((params.blast_retry_delay_seconds as int) < 0) {
+        error "--blast_retry_delay_seconds cannot be negative"
+    }
+    if ((params.blast_poll_interval_seconds as int) < 10) {
+        error "--blast_poll_interval_seconds must be at least 10"
+    }
+    if ((params.blast_max_wait_seconds as int) < 1) {
+        error "--blast_max_wait_seconds must be at least 1"
     }
 
     samples_ch = hasBarcodeDir ? inputDirToChannel(params.barcode_dir) : (file(params.samplesheet).isDirectory() ? inputDirToChannel(params.samplesheet) : samplesheetToChannel(params.samplesheet))
@@ -420,5 +580,16 @@ workflow {
     if (truthy(params.export_qiime)) {
         export_input_ch = asv_dirs_ch.map { sample, dir -> dir }.collect()
         SAVONT_EXPORT(export_input_ch)
+    }
+
+    if ((params.blast_queries as int) > 0) {
+        if (truthy(params.pooled_samples)) {
+            blast_input_ch = SAVONT_ASV_POOLED.out.asv_dir.map { dir, final_asvs, feature_table, final_clusters -> tuple('pooled', final_asvs) }
+        } else {
+            blast_input_ch = SAVONT_ASV_SAMPLE.out.asv_dir.map { sample, dir, final_asvs, feature_table, final_clusters -> tuple(sample, final_asvs) }
+        }
+        blast_plot_ch = Channel.value(file("${projectDir}/blast_remote/scripts/blast_interactive_report.awk", checkIfExists: true))
+        blast_api_ch = Channel.value(file("${projectDir}/blast_remote/scripts/ncbi_blast_url.sh", checkIfExists: true))
+        NCBI_REMOTE_BLAST(blast_input_ch, blast_plot_ch, blast_api_ch)
     }
 }

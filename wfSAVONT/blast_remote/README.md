@@ -1,16 +1,18 @@
 # Standalone NCBI Remote BLAST
 
 This one-process Nextflow workflow searches an existing nucleotide FASTA
-against an NCBI BLAST database. It does not run or resume the SAVONT workflow,
-and it does not require a local copy of the NCBI database.
+against an NCBI BLAST database. It uses NCBI's command-line HTTP URL API
+(submit RID, poll status, retrieve JSON) instead of the hanging BLAST+ remote
+RPC client. It does not run or resume the SAVONT workflow, and it does not
+require a local copy of the NCBI database.
 
 It accepts either one ASV FASTA or a directory containing ASV FASTAs from
 multiple SAVONT barcodes. Multi-barcode searches use multiple tasks of the
 same process, run sequentially to respect NCBI's remote-service guidance.
 
-The query is submitted to NCBI once. The returned BLAST archive is formatted
-locally into a strict TSV, a human-readable alignment report, and an
-interactive Plotly HTML dashboard.
+Each query is submitted once and assigned an NCBI request ID (RID). Results
+are retrieved as structured JSON and formatted locally into a strict TSV, a
+human-readable report, and an interactive Plotly HTML dashboard.
 
 ## Build the container
 
@@ -20,7 +22,8 @@ From this directory:
 apptainer build containers/blast_remote.sif containers/blast_remote.def
 ```
 
-The recipe is pinned to the Bioconda BLAST 2.17.0 container.
+The recipe is pinned to the Bioconda BLAST 2.17.0 container and adds the
+`jq` JSON processor. The base image already provides `curl`.
 
 The equivalent Singularity command is:
 
@@ -40,6 +43,23 @@ nextflow run main.nf \
 ```
 
 For Singularity, use `-profile singularity`.
+
+### Test with one or two ASVs
+
+`--dry_run_queries` performs a real remote BLAST search, but limits each input
+FASTA to its first N ASV records. For example, test one ASV with:
+
+```bash
+nextflow run main.nf \
+  -profile apptainer \
+  --query /path/to/final_asvs.fasta \
+  --outdir /path/to/results/blast_test_1 \
+  --dry_run_queries 1
+```
+
+Change the value to `2` to submit the first two ASVs. The default value `0`
+disables the limit and processes every ASV. This is distinct from Nextflow's
+`-stub-run`: `--dry_run_queries` contacts NCBI and produces real results.
 
 ### Multiple SAVONT barcodes
 
@@ -79,7 +99,8 @@ nextflow run main.nf \
 
 For an input under `savont_barcode01`, the output directory contains:
 
-- `barcode01.blast_archive.asn1`: reusable raw BLAST archive.
+- `barcode01.blast_results.json`: reusable raw NCBI JSON results.
+- `barcode01.blast_requests.tsv`: query-to-RID mapping for troubleshooting.
 - `barcode01.blast_hits.tsv`: strict machine-readable table with one header.
 - `barcode01.blast_report.txt`: human-readable alignments.
 - `barcode01.blast_dashboard.html`: interactive Plotly hit-quality dashboard.
@@ -102,19 +123,22 @@ interactive charts requires internet access.
 - `--query`: input nucleotide FASTA; required.
 - `--asv_dir`: directory containing one or more `final_asvs.fasta` files.
 - `--outdir`: output directory; default `results/remote_blast`.
-- `--db`: remote NCBI database; default `nt`.
-- `--task`: BLASTN task; default `blastn`.
+- `--db`: remote NCBI database; default `core_nt`.
+- `--task`: URL API search mode (`megablast`, `blastn`, or `blastn-short`);
+  default `megablast`.
 - `--evalue`: E-value cutoff; default `1e-20`.
 - `--max_target_seqs`: maximum target sequences retained per query; default `20`.
 - `--per_query_retries`: attempts allowed for each individual ASV; default `5`.
 - `--retry_delay_seconds`: base delay between attempts, multiplied by the
   attempt number; default `20`.
+- `--dry_run_queries`: submit only the first N ASVs from each FASTA; `0`
+  processes all ASVs (default).
+- `--poll_interval_seconds`: seconds between RID status checks; default `20`.
+- `--max_wait_seconds`: maximum time to wait for each RID; default `3600`.
 - `--container`: override the default `.sif` path.
 
-Remote BLAST requires outbound internet access. NCBI describes its BLAST
-servers as a shared resource and asks users to run only one remote BLAST
-application at a time. The workflow therefore fixes `maxForks = 1` and does
-not request query parallelism. Each ASV is submitted separately and its
-response is accepted only when NCBI reports a nonzero effective search space;
-transport errors and incomplete responses are retried. `--query` and
-`--asv_dir` are mutually exclusive; one of them is required.
+Remote BLAST requires outbound HTTPS access to
+`https://blast.ncbi.nlm.nih.gov`. The workflow fixes `maxForks = 1`, submits
+each ASV separately, records its RID, and polls without resubmitting while the
+search is queued. Transport failures and failed requests are retried.
+`--query` and `--asv_dir` are mutually exclusive; one of them is required.

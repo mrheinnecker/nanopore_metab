@@ -155,6 +155,37 @@ workflow also writes:
 The report summarizes 18S trimming, ASV counts and depths, diversity metrics,
 and PR2 taxonomic composition.
 
+## Optional Remote BLAST of Final ASVs
+
+Set `--blast_queries` to a positive integer to run that many NCBI BLAST
+queries from each final SAVONT ASV FASTA. The default is `0`, which disables
+remote BLAST. For example, to BLAST the first ten final ASVs per barcode:
+
+```bash
+nextflow run savont.nf \
+  -profile apptainer \
+  --barcode_dir /path/to/barcodes \
+  --outdir results/savont_blast \
+  --blast_queries 10
+```
+
+The terminal BLAST stage writes five files per barcode below
+`<outdir>/blast/`: raw NCBI JSON, the query-to-RID mapping, a strict hit TSV,
+a text alignment report, and an interactive HTML dashboard. In pooled mode,
+the same files use the sample name `pooled`.
+
+BLAST uses the separate
+`blast_remote/containers/blast_remote.sif` container by default. Override it
+with `--blast_container /path/to/blast_remote.sif`. The machine running this
+stage must have outbound HTTPS access to `https://blast.ncbi.nlm.nih.gov`.
+With the `slurm` profile, this lightweight network stage runs locally on the
+Nextflow controller host.
+
+Additional controls are `--blast_db`, `--blast_task`, `--blast_evalue`,
+`--blast_max_target_seqs`, `--blast_per_query_retries`,
+`--blast_retry_delay_seconds`, `--blast_poll_interval_seconds`, and
+`--blast_max_wait_seconds`.
+
 ## Optional Savont Classification
 
 Savont classification expects a Savont database directory, for example one
