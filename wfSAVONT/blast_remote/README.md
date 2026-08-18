@@ -118,8 +118,10 @@ It contains no BLAST comments or per-query summary lines.
 The HTML dashboard follows the visual style of the SAVONT biological report.
 It contains summary cards, an interactive identity-versus-coverage plot, an
 ASV-by-hit-rank heatmap, detailed hover information, and a searchable hit
-table. Plotly is loaded from its CDN when the report is opened, so viewing the
-interactive charts requires internet access.
+table. The table has adjustable minimum identity and query-coverage filters;
+both default to 95%, and a hit must meet both cutoffs to be displayed. Plotly
+is loaded from its CDN when the report is opened, so viewing the interactive
+charts requires internet access.
 
 ## Parameters
 

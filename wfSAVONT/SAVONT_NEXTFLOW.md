@@ -172,7 +172,9 @@ nextflow run savont.nf \
 The terminal BLAST stage writes five files per barcode below
 `<outdir>/blast/`: raw NCBI JSON, the query-to-RID mapping, a strict hit TSV,
 a text alignment report, and an interactive HTML dashboard. In pooled mode,
-the same files use the sample name `pooled`.
+the same files use the sample name `pooled`. The dashboard hit table defaults
+to minimum identity and query coverage cutoffs of 95%; both values are
+adjustable in the dashboard, and hits must meet both cutoffs to be shown.
 
 If SAVONT detects no ASV clusters for a sample, remote BLAST is skipped for
 that sample and the same five files are emitted as valid empty results. This
