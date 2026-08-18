@@ -42,11 +42,6 @@ process NCBI_REMOTE_BLAST {
 
     script:
     """
-    if ! grep -q '^>' ${query}; then
-        echo "Input does not contain any FASTA records: ${query}" >&2
-        exit 1
-    fi
-
     printf 'query_id\\tquery_length\\tsubject_accession\\ttaxonomy_ids\\tscientific_name\\tcommon_name\\tpercent_identity\\talignment_length\\tmismatches\\tgaps\\tquery_start\\tquery_end\\tsubject_start\\tsubject_end\\tquery_coverage\\tevalue\\tbit_score\\tsubject_title\\n' \
         > ${sample}.blast_hits.tsv
     printf 'query_file\\trid\\n' > ${sample}.blast_requests.tsv
@@ -54,6 +49,7 @@ process NCBI_REMOTE_BLAST {
     json_count=0
     : > ${sample}.blast_report.txt
 
+    if grep -q '^>' ${query}; then
     mkdir split_queries
     awk '
         /^>/ {
@@ -139,6 +135,10 @@ process NCBI_REMOTE_BLAST {
         cat "\${query_report}" >> ${sample}.blast_report.txt
         printf '\\n\\n' >> ${sample}.blast_report.txt
     done
+    else
+        echo "No ASV records detected in ${query}; skipping NCBI remote BLAST" >&2
+        printf 'No ASV records detected; NCBI remote BLAST was not run.\\n' > ${sample}.blast_report.txt
+    fi
     printf ']}' >> ${sample}.blast_results.json
 
     awk -f ${plot_script} \

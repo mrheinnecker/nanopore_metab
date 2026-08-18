@@ -383,102 +383,102 @@ process NCBI_REMOTE_BLAST {
 
     script:
     """
-    if ! grep -q '^>' ${query}; then
-        echo "Input does not contain any FASTA records: ${query}" >&2
-        exit 1
-    fi
-
     printf 'query_id\\tquery_length\\tsubject_accession\\ttaxonomy_ids\\tscientific_name\\tcommon_name\\tpercent_identity\\talignment_length\\tmismatches\\tgaps\\tquery_start\\tquery_end\\tsubject_start\\tsubject_end\\tquery_coverage\\tevalue\\tbit_score\\tsubject_title\\n' > ${sample}.blast_hits.tsv
     printf 'query_file\\trid\\n' > ${sample}.blast_requests.tsv
     printf '{"BlastOutput2":[' > ${sample}.blast_results.json
     json_count=0
     : > ${sample}.blast_report.txt
 
-    mkdir split_queries
-    awk '
-        /^>/ {
-            if (output) close(output)
-            count++
-            output = sprintf("split_queries/query_%06d.fasta", count)
-        }
-        { print > output }
-    ' ${query}
+    if grep -q '^>' ${query}; then
+        mkdir split_queries
+        awk '
+            /^>/ {
+                if (output) close(output)
+                count++
+                output = sprintf("split_queries/query_%06d.fasta", count)
+            }
+            { print > output }
+        ' ${query}
 
-    processed_queries=0
-    for query_file in split_queries/query_*.fasta; do
-        if (( processed_queries >= ${params.blast_queries} )); then
-            break
-        fi
-        processed_queries=\$((processed_queries + 1))
-
-        query_name=\$(basename "\${query_file}" .fasta)
-        query_json="\${query_name}.json"
-        query_report="\${query_name}.txt"
-        query_ok=false
-
-        for attempt in \$(seq 1 ${params.blast_per_query_retries}); do
-            rm -f "\${query_json}" "\${query_report}"
-            echo "Submitting \${query_name} to NCBI (attempt \${attempt}/${params.blast_per_query_retries})" >&2
-
-            if rid=\$(bash ${api_script} \
-                "\${query_file}" \
-                "${params.blast_db}" \
-                "${params.blast_task}" \
-                "${params.blast_evalue}" \
-                "${params.blast_max_target_seqs}" \
-                "${params.blast_poll_interval_seconds}" \
-                "${params.blast_max_wait_seconds}" \
-                "\${query_json}" \
-                "\${query_report}"); then
-                query_ok=true
+        processed_queries=0
+        for query_file in split_queries/query_*.fasta; do
+            if (( processed_queries >= ${params.blast_queries} )); then
                 break
             fi
+            processed_queries=\$((processed_queries + 1))
 
-            echo "NCBI returned an incomplete/error response for \${query_name}" >&2
-            if (( attempt < ${params.blast_per_query_retries} )); then
-                sleep \$(( ${params.blast_retry_delay_seconds} * attempt ))
+            query_name=\$(basename "\${query_file}" .fasta)
+            query_json="\${query_name}.json"
+            query_report="\${query_name}.txt"
+            query_ok=false
+
+            for attempt in \$(seq 1 ${params.blast_per_query_retries}); do
+                rm -f "\${query_json}" "\${query_report}"
+                echo "Submitting \${query_name} to NCBI (attempt \${attempt}/${params.blast_per_query_retries})" >&2
+
+                if rid=\$(bash ${api_script} \
+                    "\${query_file}" \
+                    "${params.blast_db}" \
+                    "${params.blast_task}" \
+                    "${params.blast_evalue}" \
+                    "${params.blast_max_target_seqs}" \
+                    "${params.blast_poll_interval_seconds}" \
+                    "${params.blast_max_wait_seconds}" \
+                    "\${query_json}" \
+                    "\${query_report}"); then
+                    query_ok=true
+                    break
+                fi
+
+                echo "NCBI returned an incomplete/error response for \${query_name}" >&2
+                if (( attempt < ${params.blast_per_query_retries} )); then
+                    sleep \$(( ${params.blast_retry_delay_seconds} * attempt ))
+                fi
+            done
+
+            if [[ "\${query_ok}" != true ]]; then
+                echo "No valid NCBI response for \${query_name} after ${params.blast_per_query_retries} attempts" >&2
+                exit 75
             fi
+
+            printf '%s\\t%s\\n' "\${query_name}" "\${rid}" >> ${sample}.blast_requests.tsv
+            if (( json_count > 0 )); then printf ',' >> ${sample}.blast_results.json; fi
+            jq -c '.BlastOutput2[]' "\${query_json}" >> ${sample}.blast_results.json
+            json_count=\$((json_count + 1))
+
+            jq -r '
+                .BlastOutput2[].report.results.search as \$search
+                | \$search.hits[]?
+                | .description[0] as \$description
+                | .hsps[0] as \$hsp
+                | [
+                    (\$search.query_title | split(" ")[0]),
+                    \$search.query_len,
+                    \$description.accession,
+                    (\$description.taxid // ""),
+                    (\$description.sciname // ""),
+                    "",
+                    (100 * \$hsp.identity / \$hsp.align_len),
+                    \$hsp.align_len,
+                    (\$hsp.align_len - \$hsp.identity - \$hsp.gaps),
+                    \$hsp.gaps,
+                    \$hsp.query_from,
+                    \$hsp.query_to,
+                    \$hsp.hit_from,
+                    \$hsp.hit_to,
+                    (100 * ((\$hsp.query_to - \$hsp.query_from) | fabs + 1) / \$search.query_len),
+                    \$hsp.evalue,
+                    \$hsp.bit_score,
+                    \$description.title
+                  ] | @tsv
+            ' "\${query_json}" >> ${sample}.blast_hits.tsv
+            cat "\${query_report}" >> ${sample}.blast_report.txt
+            printf '\\n\\n' >> ${sample}.blast_report.txt
         done
-
-        if [[ "\${query_ok}" != true ]]; then
-            echo "No valid NCBI response for \${query_name} after ${params.blast_per_query_retries} attempts" >&2
-            exit 75
-        fi
-
-        printf '%s\\t%s\\n' "\${query_name}" "\${rid}" >> ${sample}.blast_requests.tsv
-        if (( json_count > 0 )); then printf ',' >> ${sample}.blast_results.json; fi
-        jq -c '.BlastOutput2[]' "\${query_json}" >> ${sample}.blast_results.json
-        json_count=\$((json_count + 1))
-
-        jq -r '
-            .BlastOutput2[].report.results.search as \$search
-            | \$search.hits[]?
-            | .description[0] as \$description
-            | .hsps[0] as \$hsp
-            | [
-                (\$search.query_title | split(" ")[0]),
-                \$search.query_len,
-                \$description.accession,
-                (\$description.taxid // ""),
-                (\$description.sciname // ""),
-                "",
-                (100 * \$hsp.identity / \$hsp.align_len),
-                \$hsp.align_len,
-                (\$hsp.align_len - \$hsp.identity - \$hsp.gaps),
-                \$hsp.gaps,
-                \$hsp.query_from,
-                \$hsp.query_to,
-                \$hsp.hit_from,
-                \$hsp.hit_to,
-                (100 * ((\$hsp.query_to - \$hsp.query_from) | fabs + 1) / \$search.query_len),
-                \$hsp.evalue,
-                \$hsp.bit_score,
-                \$description.title
-              ] | @tsv
-        ' "\${query_json}" >> ${sample}.blast_hits.tsv
-        cat "\${query_report}" >> ${sample}.blast_report.txt
-        printf '\\n\\n' >> ${sample}.blast_report.txt
-    done
+    else
+        echo "No ASV records detected in ${query}; skipping NCBI remote BLAST" >&2
+        printf 'No ASV records detected; NCBI remote BLAST was not run.\\n' > ${sample}.blast_report.txt
+    fi
     printf ']}' >> ${sample}.blast_results.json
 
     awk -f ${plot_script} -v sample="${sample}" ${sample}.blast_hits.tsv > ${sample}.blast_dashboard.html

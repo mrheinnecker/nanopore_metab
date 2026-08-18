@@ -174,6 +174,10 @@ The terminal BLAST stage writes five files per barcode below
 a text alignment report, and an interactive HTML dashboard. In pooled mode,
 the same files use the sample name `pooled`.
 
+If SAVONT detects no ASV clusters for a sample, remote BLAST is skipped for
+that sample and the same five files are emitted as valid empty results. This
+does not fail the rest of the workflow.
+
 BLAST uses the separate
 `blast_remote/containers/blast_remote.sif` container by default. Override it
 with `--blast_container /path/to/blast_remote.sif`. The machine running this

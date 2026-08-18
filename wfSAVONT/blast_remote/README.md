@@ -105,7 +105,10 @@ For an input under `savont_barcode01`, the output directory contains:
 - `barcode01.blast_report.txt`: human-readable alignments.
 - `barcode01.blast_dashboard.html`: interactive Plotly hit-quality dashboard.
 
-Each additional barcode gets the same four files with its own barcode name.
+Each additional barcode gets the same five files with its own barcode name.
+An input FASTA containing no ASV records is treated as a valid empty result:
+NCBI is not contacted, and the five output files contain empty JSON/TSV data,
+an explanatory text report, and a no-hits dashboard.
 
 The table reports query and subject identifiers, query length, accession,
 NCBI taxon IDs, scientific/common names, identity, alignment length,

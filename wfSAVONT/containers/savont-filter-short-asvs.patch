@@ -1,0 +1,23 @@
+diff --git a/src/main.rs b/src/main.rs
+index 35f73d2..e8bb5c2 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -142,5 +142,18 @@ fn run_cluster(args: &cli::ClusterArgs, cli_args: &cli::Cli) {
+     alignment::refine_asv_depths_with_em(&twin_reads, &mut consensuses, &kmer_info, &args, &temp_dir);
++
++    // A consensus shorter than the clustering k-mer cannot be converted back
++    // into a TwinRead. Besides being uninformative as an ASV, allowing it to
++    // reach debug_consensus_twin_read() causes get_twin_read_syncmer() to
++    // return None and the diagnostic unwrap below to panic. Filter it before
++    // writing any final output so the FASTA, feature table, and cluster table
++    // remain mutually consistent.
++    let consensus_count_before_length_filter = consensuses.len();
++    consensuses.retain(|consensus| consensus.decompressed_sequence
++        .as_ref().map_or(false, |sequence| sequence.len() >= args.kmer_size));
++    let removed_short_consensuses = consensus_count_before_length_filter - consensuses.len();
++    if removed_short_consensuses > 0 { log::warn!("Filtered {} final consensus sequence(s) shorter than the k-mer size ({} bp)", removed_short_consensuses, args.kmer_size); }
++
+     consensuses.sort_by(|a, b| b.depth.partial_cmp(&a.depth).unwrap());
+     log_memory_usage(true, "STAGE 7 DONE: Refined ASV depths with EM algorithm");
+ 
+     log::info!("Final consensus count after EM refinement: {}", consensuses.len());

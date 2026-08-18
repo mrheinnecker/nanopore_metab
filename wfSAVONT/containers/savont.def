@@ -1,6 +1,9 @@
 Bootstrap: docker
 From: mambaorg/micromamba:1.5.8
 
+%files
+    containers/savont-filter-short-asvs.patch /opt/savont-filter-short-asvs.patch
+
 %labels
     Author BaNaNA
     Description Standalone Savont runtime with Barrnap, Python trim18s helpers, and pinned Savont build
@@ -19,12 +22,16 @@ From: mambaorg/micromamba:1.5.8
         compilers
 
     export PATH=/opt/conda/bin:$PATH
+    ln -sf /opt/conda/bin/x86_64-conda-linux-gnu-ar /opt/conda/bin/ar
+    ln -sf /opt/conda/bin/x86_64-conda-linux-gnu-ranlib /opt/conda/bin/ranlib
     rustc --version
     cargo --version
 
     git clone https://github.com/bluenote-1577/savont.git /opt/savont
     cd /opt/savont
     git checkout e4e499228df50b8e9a4eb64345ef114424a81477
+    git apply /opt/savont-filter-short-asvs.patch
+    export AR=/opt/conda/bin/x86_64-conda-linux-gnu-ar
     cargo install --locked --path . --root /usr/local
     micromamba clean --all --yes
 
