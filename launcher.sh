@@ -66,7 +66,7 @@ cd /g/schwab/marco/repos/nanopore_metab/wfBANANA
 nextflow run main.nf \
   -profile slurm,apptainer \
   -work-dir /scratch/rheinnec/nanopore_metab_work \
-  --barcode_dir /g/schwab/marco/projects/nanopore_metab/raw_sequencing_results/nanopore_second_run/fastq_pass/per_barcode \
+  --samplesheet /g/schwab/marco/projects/nanopore_metab/samplesheet.tsv \
   --db_location /g/schwab/marco/projects/nanopore_metab/databases/pr2_version_5.1.1_SSU_taxo_long.fasta \
   --outdir /g/schwab/marco/projects/nanopore_metab/output/nanopore_second_run02 \
   --container /g/schwab/marco/projects/nanopore_metab/containers/banana.sif
@@ -76,16 +76,19 @@ cd /g/schwab/marco/repos/nanopore_metab/wfSAVONT
 nextflow run savont.nf \
   -profile slurm,apptainer \
   -work-dir /scratch/rheinnec/savont_work \
-  --barcode_dir /g/schwab/marco/projects/nanopore_metab/raw_sequencing_results/nanopore_second_run/fastq_pass/per_barcode \
-  --outdir /g/schwab/marco/projects/nanopore_metab/output/savont \
+  --samplesheet /g/schwab/marco/projects/nanopore_metab/samplesheet.tsv \
+  --outdir /g/schwab/marco/projects/nanopore_metab/output/savont/run02/20260716_rebasecalling_SUP/02_trimmed \
   --container /g/schwab/marco/container_devel/savont.sif \
+  --blast_container /g/schwab/marco/container_legacy/blast_remote.sif \
   --pr2_db /g/schwab/marco/projects/nanopore_metab/databases/pr2_version_5.1.1_SSU_taxo_long.fasta \
   --min_read_length 1000 \
   --max_read_length 4000 \
   --min_cluster_size 12 \
   --trim_threads 4 \
   --savont_threads 4 \
-  --taxonomy_threads 4
+  --taxonomy_threads 4 \
+  --blast_queries 20 \
+  -resume
 
 
 
