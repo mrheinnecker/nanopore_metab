@@ -1,3 +1,4 @@
+import csv
 import gzip
 import importlib.util
 import json
@@ -53,6 +54,22 @@ class FastqRunQcTests(unittest.TestCase):
             )
             self.assertTrue((output / "run_qc_dashboard.html").is_file())
             self.assertTrue((output / "run_qc_summary.tsv").is_file())
+            per_read_path = output / "run_qc_per_read.tsv"
+            self.assertTrue(per_read_path.is_file())
+            with per_read_path.open(newline="", encoding="utf-8") as handle:
+                per_read_rows = list(csv.DictReader(handle, delimiter="\t"))
+            self.assertEqual(
+                list(per_read_rows[0]),
+                ["read_id", "barcode", "read_length", "mean_qscore", "source_file"],
+            )
+            self.assertEqual([row["read_id"] for row in per_read_rows], ["read1", "read2", "read3"])
+            self.assertEqual([row["read_length"] for row in per_read_rows], ["4", "8", "10"])
+            self.assertEqual(
+                [row["barcode"] for row in per_read_rows],
+                ["barcode01", "barcode01", "barcode02"],
+            )
+            self.assertAlmostEqual(float(per_read_rows[0]["mean_qscore"]), 40.0)
+            self.assertAlmostEqual(float(per_read_rows[1]["mean_qscore"]), 10.0)
             metrics = json.loads((output / "run_qc_metrics.json").read_text())
             self.assertEqual(metrics["overall"]["reads"], 3)
             self.assertEqual([row["barcode"] for row in metrics["barcodes"]], ["barcode01", "barcode02"])

@@ -8,6 +8,8 @@ streams every read, groups the results by barcode, and writes:
 
 - `run_qc_dashboard.html`: interactive read-length and quality dashboard.
 - `run_qc_summary.tsv`: one machine-readable summary row per barcode.
+- `run_qc_per_read.tsv`: one row per analyzed read, containing its read ID,
+  barcode, length, mean Q score, and source FASTQ file.
 - `run_qc_metrics.json`: complete summary metrics and binned distributions.
 
 Only Python 3 is required. The dashboard loads Plotly from its CDN when opened.
@@ -39,4 +41,7 @@ python3 run_qc/fastq_run_qc.py /path/to/per_barcode \
 
 The default analysis has no read limit. Histogram resolution can be changed
 with `--length-bin-width` (default 100 bp) and `--quality-bin-width` (default
-0.5 Q-score units).
+0.5 Q-score units). The per-read table is streamed to disk during analysis, so
+even very long tables do not need to be held in memory. Its `mean_qscore`
+column uses the ONT convention: Phred scores are converted to error
+probabilities, averaged across the read, and converted back to a Q score.

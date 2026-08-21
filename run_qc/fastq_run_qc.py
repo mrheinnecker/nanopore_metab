@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import gzip
 import html
 import json
@@ -260,8 +261,18 @@ def analyse_fastqs(
     barcode_source: str,
     max_reads_per_barcode: int,
     progress_every: int,
+    per_read_handle: TextIO | None = None,
 ) -> dict[str, BarcodeStats]:
     stats_by_barcode: dict[str, BarcodeStats] = {}
+    per_read_writer = (
+        csv.writer(per_read_handle, delimiter="\t", lineterminator="\n")
+        if per_read_handle is not None
+        else None
+    )
+    if per_read_writer:
+        per_read_writer.writerow(
+            ("read_id", "barcode", "read_length", "mean_qscore", "source_file")
+        )
     total_reads = 0
     for file_number, (path, fallback_barcode) in enumerate(inputs, start=1):
         print(f"[{file_number}/{len(inputs)}] Reading {path}", file=sys.stderr)
@@ -278,6 +289,10 @@ def analyse_fastqs(
             except ValueError as error:
                 raise ValueError(f"{error} in read {header.split(maxsplit=1)[0]} from {path}") from error
             stats.add(len(sequence), qscore, path)
+            if per_read_writer:
+                per_read_writer.writerow(
+                    (header.split(maxsplit=1)[0], barcode, len(sequence), f"{qscore:.6f}", str(path))
+                )
             total_reads += 1
             if progress_every and total_reads % progress_every == 0:
                 print(f"  Processed {total_reads:,} reads", file=sys.stderr)
@@ -375,13 +390,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.progress_every < 0:
         parser.error("--progress-every cannot be negative")
 
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    per_read_path = args.output_dir / "run_qc_per_read.tsv"
+    per_read_temporary_path = args.output_dir / ".run_qc_per_read.tsv.tmp"
     try:
         inputs = discover_fastqs(args.input, args.sample_name)
         print(f"Discovered {len(inputs)} FASTQ file(s)", file=sys.stderr)
-        stats_by_barcode = analyse_fastqs(
-            inputs, args.barcode_source, args.max_reads_per_barcode, args.progress_every
-        )
+        with per_read_temporary_path.open("w", encoding="utf-8", newline="") as per_read_handle:
+            stats_by_barcode = analyse_fastqs(
+                inputs,
+                args.barcode_source,
+                args.max_reads_per_barcode,
+                args.progress_every,
+                per_read_handle,
+            )
+        per_read_temporary_path.replace(per_read_path)
     except (OSError, UnicodeError, ValueError) as error:
+        per_read_temporary_path.unlink(missing_ok=True)
         parser.exit(2, f"error: {error}\n")
 
     ordered = sorted(stats_by_barcode.values(), key=lambda stats: natural_key(stats.name))
@@ -389,7 +414,6 @@ def main(argv: list[str] | None = None) -> int:
     overall_stats = combine_stats(stats_by_barcode)
     overall = metrics_for(overall_stats, args.length_bin_width, args.quality_bin_width)
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
     summary_path = args.output_dir / "run_qc_summary.tsv"
     metrics_path = args.output_dir / "run_qc_metrics.json"
     dashboard_path = args.output_dir / "run_qc_dashboard.html"
@@ -402,6 +426,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Analysed {overall['reads']:,} reads across {len(rows)} barcode(s)", file=sys.stderr)
     print(f"Dashboard: {dashboard_path.resolve()}")
     print(f"Summary:   {summary_path.resolve()}")
+    print(f"Per read:  {per_read_path.resolve()}")
     print(f"Metrics:   {metrics_path.resolve()}")
     return 0
 
